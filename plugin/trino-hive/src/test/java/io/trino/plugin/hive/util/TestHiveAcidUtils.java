@@ -17,13 +17,17 @@ import io.trino.plugin.hive.util.FileSystemTesting.MockFile;
 import io.trino.plugin.hive.util.FileSystemTesting.MockFileSystem;
 import io.trino.plugin.hive.util.FileSystemTesting.MockPath;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.common.ValidCompactorWriteIdList;
+import org.apache.hadoop.hive.common.ValidReadTxnList;
 import org.apache.hadoop.hive.common.ValidReaderWriteIdList;
+import org.apache.hadoop.hive.common.ValidTxnList;
+import org.apache.hadoop.hive.common.ValidWriteIdList;
 import org.apache.hadoop.hive.ql.exec.Utilities;
+import org.apache.hadoop.hive.ql.io.AcidDirectory;
 import org.apache.hadoop.hive.ql.io.AcidUtils;
 import org.apache.hadoop.hive.shims.HadoopShims.HdfsFileStatusWithId;
+import org.apache.hive.common.util.Ref;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -39,7 +43,7 @@ public class TestHiveAcidUtils
     @Test
     public void testParsing()
     {
-        assertThat(AcidUtils.parseBase(new Path("/tmp/base_000123"))).isEqualTo(123);
+        assertThat(AcidUtils.ParsedBaseLight.parseBase(new Path("/tmp/base_000123")).getWriteId()).isEqualTo(123);
     }
 
     @Test
@@ -58,10 +62,10 @@ public class TestHiveAcidUtils
                 new MockFile("mock:/tbl/part1/_tmp/000000_0", 0, new byte[0]),
                 new MockFile("mock:/tbl/part1/_tmp/abc/000000_0", 0, new byte[0]),
                 new MockFile("mock:/tbl/part1/subdir/000000_0", 0, new byte[0]));
-        AcidUtils.Directory dir = AcidUtils.getAcidState(
+        AcidDirectory dir = getAcidState(
                 new MockPath(fs, "/tbl/part1"),
                 conf,
-                new ValidReaderWriteIdList("tbl:100:" + Long.MAX_VALUE + ":"));
+                ValidReaderWriteIdList.fromValue("tbl:100:" + Long.MAX_VALUE + ":"));
         assertThat(dir.getBaseDirectory()).isNull();
         assertThat(dir.getCurrentDirectories()).isEmpty();
         assertThat(dir.getObsolete()).isEmpty();
@@ -95,15 +99,15 @@ public class TestHiveAcidUtils
                 new MockFile("mock:/tbl/part1/delta_025_030/bucket_0", 0, new byte[0]),
                 new MockFile("mock:/tbl/part1/delta_050_100/bucket_0", 0, new byte[0]),
                 new MockFile("mock:/tbl/part1/delta_101_101/bucket_0", 0, new byte[0]));
-        AcidUtils.Directory dir = AcidUtils.getAcidState(
+        AcidDirectory dir = getAcidState(
                 new MockPath(fs, "mock:/tbl/part1"),
                 conf,
-                new ValidReaderWriteIdList("tbl:100:" + Long.MAX_VALUE + ":"));
+                ValidReaderWriteIdList.fromValue("tbl:100:" + Long.MAX_VALUE + ":"));
         assertThat(dir.getBaseDirectory()).isNull();
-        List<FileStatus> obsolete = dir.getObsolete();
+        List<Path> obsolete = dir.getObsolete();
         assertThat(obsolete).hasSize(2);
-        assertThat(obsolete.get(0).getPath().toString()).isEqualTo("mock:/tbl/part1/delta_025_025");
-        assertThat(obsolete.get(1).getPath().toString()).isEqualTo("mock:/tbl/part1/delta_029_029");
+        assertThat(obsolete.get(0).toString()).isEqualTo("mock:/tbl/part1/delta_025_025");
+        assertThat(obsolete.get(1).toString()).isEqualTo("mock:/tbl/part1/delta_029_029");
         List<HdfsFileStatusWithId> result = dir.getOriginalFiles();
         assertThat(result).hasSize(5);
         assertThat(result.get(0).getFileStatus().getPath().toString()).isEqualTo("mock:/tbl/part1/000000_0");
@@ -140,15 +144,16 @@ public class TestHiveAcidUtils
                 new MockFile("mock:/tbl/part1/delta_050_105/bucket_0", 0, new byte[0]),
                 new MockFile("mock:/tbl/part1/delta_90_120/bucket_0", 0, new byte[0]));
         MockPath part = new MockPath(fs, "mock:/tbl/part1");
-        AcidUtils.Directory dir = AcidUtils.getAcidState(part, conf, new ValidReaderWriteIdList("tbl:100:" + Long.MAX_VALUE + ":"));
+        AcidDirectory dir = getAcidState(part, conf, ValidReaderWriteIdList.fromValue("tbl:100:" + Long.MAX_VALUE + ":"));
         assertThat(dir.getBaseDirectory().toString()).isEqualTo("mock:/tbl/part1/base_49");
-        List<FileStatus> obsolete = dir.getObsolete();
+        List<Path> obsolete = dir.getObsolete();
         assertThat(obsolete).hasSize(5);
-        assertThat(obsolete.get(0).getPath().toString()).isEqualTo("mock:/tbl/part1/base_10");
-        assertThat(obsolete.get(1).getPath().toString()).isEqualTo("mock:/tbl/part1/base_5");
-        assertThat(obsolete.get(2).getPath().toString()).isEqualTo("mock:/tbl/part1/delta_025_030");
-        assertThat(obsolete.get(3).getPath().toString()).isEqualTo("mock:/tbl/part1/delta_025_025");
-        assertThat(obsolete.get(4).getPath().toString()).isEqualTo("mock:/tbl/part1/delta_029_029");
+        // Hive 4 returns obsolete base directories in ascending write id order (Hive 3 was descending)
+        assertThat(obsolete.get(0).toString()).isEqualTo("mock:/tbl/part1/base_5");
+        assertThat(obsolete.get(1).toString()).isEqualTo("mock:/tbl/part1/base_10");
+        assertThat(obsolete.get(2).toString()).isEqualTo("mock:/tbl/part1/delta_025_030");
+        assertThat(obsolete.get(3).toString()).isEqualTo("mock:/tbl/part1/delta_025_025");
+        assertThat(obsolete.get(4).toString()).isEqualTo("mock:/tbl/part1/delta_029_029");
         assertThat(dir.getOriginalFiles()).isEmpty();
         List<AcidUtils.ParsedDelta> deltas = dir.getCurrentDirectories();
         assertThat(deltas).hasSize(1);
@@ -169,11 +174,11 @@ public class TestHiveAcidUtils
                 new MockFile("mock:/tbl/part1/000000_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/000001_1", 500, new byte[0]));
         Path part = new MockPath(fs, "/tbl/part1");
-        AcidUtils.Directory dir = AcidUtils.getAcidState(part, conf, new ValidReaderWriteIdList("tbl:150:" + Long.MAX_VALUE + ":"));
+        AcidDirectory dir = getAcidState(part, conf, ValidReaderWriteIdList.fromValue("tbl:150:" + Long.MAX_VALUE + ":"));
         // Obsolete list should include the two original bucket files, and the old base dir
-        List<FileStatus> obsolete = dir.getObsolete();
+        List<Path> obsolete = dir.getObsolete();
         assertThat(obsolete).hasSize(3);
-        assertThat(obsolete.get(0).getPath().toString()).isEqualTo("mock:/tbl/part1/base_5");
+        assertThat(obsolete.get(0).toString()).isEqualTo("mock:/tbl/part1/base_5");
         assertThat(dir.getBaseDirectory().toString()).isEqualTo("mock:/tbl/part1/base_10");
     }
 
@@ -191,12 +196,12 @@ public class TestHiveAcidUtils
                 new MockFile("mock:/tbl/part1/delta_052_55/bucket_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/base_50/bucket_0", 500, new byte[0]));
         Path part = new MockPath(fs, "mock:/tbl/part1");
-        AcidUtils.Directory dir = AcidUtils.getAcidState(part, conf, new ValidReaderWriteIdList("tbl:100:" + Long.MAX_VALUE + ":"));
+        AcidDirectory dir = getAcidState(part, conf, ValidReaderWriteIdList.fromValue("tbl:100:" + Long.MAX_VALUE + ":"));
         assertThat(dir.getBaseDirectory().toString()).isEqualTo("mock:/tbl/part1/base_50");
-        List<FileStatus> obsolete = dir.getObsolete();
+        List<Path> obsolete = dir.getObsolete();
         assertThat(obsolete).hasSize(2);
-        assertThat(obsolete.get(0).getPath().toString()).isEqualTo("mock:/tbl/part1/delta_052_55");
-        assertThat(obsolete.get(1).getPath().toString()).isEqualTo("mock:/tbl/part1/delta_0060_60");
+        assertThat(obsolete.get(0).toString()).isEqualTo("mock:/tbl/part1/delta_052_55");
+        assertThat(obsolete.get(1).toString()).isEqualTo("mock:/tbl/part1/delta_0060_60");
         List<AcidUtils.ParsedDelta> delts = dir.getCurrentDirectories();
         assertThat(delts).hasSize(4);
         assertThat(delts.get(0).getPath().toString()).isEqualTo("mock:/tbl/part1/delta_40_60");
@@ -223,15 +228,15 @@ public class TestHiveAcidUtils
                 new MockFile("mock:/tbl/part1/delta_058_58/bucket_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/base_50/bucket_0", 500, new byte[0]));
         Path part = new MockPath(fs, "mock:/tbl/part1");
-        AcidUtils.Directory dir = AcidUtils.getAcidState(part, conf, new ValidReaderWriteIdList("tbl:100:" + Long.MAX_VALUE + ":"));
+        AcidDirectory dir = getAcidState(part, conf, ValidReaderWriteIdList.fromValue("tbl:100:" + Long.MAX_VALUE + ":"));
         assertThat(dir.getBaseDirectory().toString()).isEqualTo("mock:/tbl/part1/base_50");
-        List<FileStatus> obsolete = dir.getObsolete();
+        List<Path> obsolete = dir.getObsolete();
         assertThat(obsolete).hasSize(5);
-        assertThat(obsolete.get(0).getPath().toString()).isEqualTo("mock:/tbl/part1/delta_052_55");
-        assertThat(obsolete.get(1).getPath().toString()).isEqualTo("mock:/tbl/part1/delta_058_58");
-        assertThat(obsolete.get(2).getPath().toString()).isEqualTo("mock:/tbl/part1/delta_0060_60_1");
-        assertThat(obsolete.get(3).getPath().toString()).isEqualTo("mock:/tbl/part1/delta_0060_60_4");
-        assertThat(obsolete.get(4).getPath().toString()).isEqualTo("mock:/tbl/part1/delta_0060_60_7");
+        assertThat(obsolete.get(0).toString()).isEqualTo("mock:/tbl/part1/delta_052_55");
+        assertThat(obsolete.get(1).toString()).isEqualTo("mock:/tbl/part1/delta_058_58");
+        assertThat(obsolete.get(2).toString()).isEqualTo("mock:/tbl/part1/delta_0060_60_1");
+        assertThat(obsolete.get(3).toString()).isEqualTo("mock:/tbl/part1/delta_0060_60_4");
+        assertThat(obsolete.get(4).toString()).isEqualTo("mock:/tbl/part1/delta_0060_60_7");
         List<AcidUtils.ParsedDelta> delts = dir.getCurrentDirectories();
         assertThat(delts).hasSize(5);
         assertThat(delts.get(0).getPath().toString()).isEqualTo("mock:/tbl/part1/delta_40_60");
@@ -250,7 +255,7 @@ public class TestHiveAcidUtils
                 new MockFile("mock:/tbl/part1/delta_1_1/bucket_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/delta_2_5/bucket_0", 500, new byte[0]));
         Path part = new MockPath(fs, "mock:/tbl/part1");
-        AcidUtils.Directory dir = AcidUtils.getAcidState(part, conf, new ValidReaderWriteIdList("tbl:100:4:4"));
+        AcidDirectory dir = getAcidState(part, conf, ValidReaderWriteIdList.fromValue("tbl:100:4:4"));
         List<AcidUtils.ParsedDelta> delts = dir.getCurrentDirectories();
         assertThat(delts).hasSize(2);
         assertThat(delts.get(0).getPath().toString()).isEqualTo("mock:/tbl/part1/delta_1_1");
@@ -269,7 +274,7 @@ public class TestHiveAcidUtils
                 new MockFile("mock:/tbl/part1/delta_4_4_3/bucket_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/delta_101_101_1/bucket_0", 500, new byte[0]));
         Path part = new MockPath(fs, "mock:/tbl/part1");
-        AcidUtils.Directory dir = AcidUtils.getAcidState(part, conf, new ValidReaderWriteIdList("tbl:100:4:4"));
+        AcidDirectory dir = getAcidState(part, conf, ValidReaderWriteIdList.fromValue("tbl:100:4:4"));
         List<AcidUtils.ParsedDelta> delts = dir.getCurrentDirectories();
         assertThat(delts).hasSize(2);
         assertThat(delts.get(0).getPath().toString()).isEqualTo("mock:/tbl/part1/delta_1_1");
@@ -285,7 +290,7 @@ public class TestHiveAcidUtils
                 new MockFile("mock:/tbl/part1/delta_1_1/bucket_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/delta_2_5/bucket_0", 500, new byte[0]));
         Path part = new MockPath(fs, "mock:/tbl/part1");
-        AcidUtils.Directory dir = AcidUtils.getAcidState(part, conf, new ValidCompactorWriteIdList("tbl:4:" + Long.MAX_VALUE));
+        AcidDirectory dir = getAcidState(part, conf, ValidCompactorWriteIdList.fromValue("tbl:4:" + Long.MAX_VALUE));
         List<AcidUtils.ParsedDelta> delts = dir.getCurrentDirectories();
         assertThat(delts).hasSize(1);
         assertThat(delts.get(0).getPath().toString()).isEqualTo("mock:/tbl/part1/delta_1_1");
@@ -302,7 +307,7 @@ public class TestHiveAcidUtils
                 new MockFile("mock:/tbl/part1/delta_2_5/bucket_0" + AcidUtils.DELTA_SIDE_FILE_SUFFIX, 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/delta_6_10/bucket_0", 500, new byte[0]));
         Path part = new MockPath(fs, "mock:/tbl/part1");
-        AcidUtils.Directory dir = AcidUtils.getAcidState(part, conf, new ValidCompactorWriteIdList("tbl:3:" + Long.MAX_VALUE));
+        AcidDirectory dir = getAcidState(part, conf, ValidCompactorWriteIdList.fromValue("tbl:3:" + Long.MAX_VALUE));
         List<AcidUtils.ParsedDelta> delts = dir.getCurrentDirectories();
         assertThat(delts).hasSize(1);
         assertThat(delts.get(0).getPath().toString()).isEqualTo("mock:/tbl/part1/delta_1_1");
@@ -326,17 +331,18 @@ public class TestHiveAcidUtils
                 new MockFile("mock:/tbl/part1/delete_delta_050_105/bucket_0", 0, new byte[0]),
                 new MockFile("mock:/tbl/part1/delete_delta_110_110/bucket_0", 0, new byte[0]));
         MockPath part = new MockPath(fs, "mock:/tbl/part1");
-        AcidUtils.Directory dir = AcidUtils.getAcidState(part, conf, new ValidReaderWriteIdList("tbl:100:" + Long.MAX_VALUE + ":"));
+        AcidDirectory dir = getAcidState(part, conf, ValidReaderWriteIdList.fromValue("tbl:100:" + Long.MAX_VALUE + ":"));
         assertThat(dir.getBaseDirectory().toString()).isEqualTo("mock:/tbl/part1/base_49");
-        List<FileStatus> obsolete = dir.getObsolete();
+        List<Path> obsolete = dir.getObsolete();
         assertThat(obsolete).hasSize(7);
-        assertThat(obsolete.get(0).getPath().toString()).isEqualTo("mock:/tbl/part1/base_10");
-        assertThat(obsolete.get(1).getPath().toString()).isEqualTo("mock:/tbl/part1/base_5");
-        assertThat(obsolete.get(2).getPath().toString()).isEqualTo("mock:/tbl/part1/delete_delta_025_030");
-        assertThat(obsolete.get(3).getPath().toString()).isEqualTo("mock:/tbl/part1/delta_025_030");
-        assertThat(obsolete.get(4).getPath().toString()).isEqualTo("mock:/tbl/part1/delta_025_025");
-        assertThat(obsolete.get(5).getPath().toString()).isEqualTo("mock:/tbl/part1/delete_delta_029_029");
-        assertThat(obsolete.get(6).getPath().toString()).isEqualTo("mock:/tbl/part1/delta_029_029");
+        // Hive 4 returns obsolete base directories in ascending write id order (Hive 3 was descending)
+        assertThat(obsolete.get(0).toString()).isEqualTo("mock:/tbl/part1/base_5");
+        assertThat(obsolete.get(1).toString()).isEqualTo("mock:/tbl/part1/base_10");
+        assertThat(obsolete.get(2).toString()).isEqualTo("mock:/tbl/part1/delete_delta_025_030");
+        assertThat(obsolete.get(3).toString()).isEqualTo("mock:/tbl/part1/delta_025_030");
+        assertThat(obsolete.get(4).toString()).isEqualTo("mock:/tbl/part1/delta_025_025");
+        assertThat(obsolete.get(5).toString()).isEqualTo("mock:/tbl/part1/delete_delta_029_029");
+        assertThat(obsolete.get(6).toString()).isEqualTo("mock:/tbl/part1/delta_029_029");
         assertThat(dir.getOriginalFiles()).isEmpty();
         List<AcidUtils.ParsedDelta> deltas = dir.getCurrentDirectories();
         assertThat(deltas).hasSize(2);
@@ -362,13 +368,13 @@ public class TestHiveAcidUtils
                 new MockFile("mock:/tbl/part1/delete_delta_052_55/bucket_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/base_50/bucket_0", 500, new byte[0]));
         Path part = new MockPath(fs, "mock:/tbl/part1");
-        AcidUtils.Directory dir = AcidUtils.getAcidState(part, conf, new ValidReaderWriteIdList("tbl:100:" + Long.MAX_VALUE + ":"));
+        AcidDirectory dir = getAcidState(part, conf, ValidReaderWriteIdList.fromValue("tbl:100:" + Long.MAX_VALUE + ":"));
         assertThat(dir.getBaseDirectory().toString()).isEqualTo("mock:/tbl/part1/base_50");
-        List<FileStatus> obsolete = dir.getObsolete();
+        List<Path> obsolete = dir.getObsolete();
         assertThat(obsolete).hasSize(3);
-        assertThat(obsolete.get(0).getPath().toString()).isEqualTo("mock:/tbl/part1/delete_delta_052_55");
-        assertThat(obsolete.get(1).getPath().toString()).isEqualTo("mock:/tbl/part1/delta_052_55");
-        assertThat(obsolete.get(2).getPath().toString()).isEqualTo("mock:/tbl/part1/delta_0060_60");
+        assertThat(obsolete.get(0).toString()).isEqualTo("mock:/tbl/part1/delete_delta_052_55");
+        assertThat(obsolete.get(1).toString()).isEqualTo("mock:/tbl/part1/delta_052_55");
+        assertThat(obsolete.get(2).toString()).isEqualTo("mock:/tbl/part1/delta_0060_60");
         List<AcidUtils.ParsedDelta> delts = dir.getCurrentDirectories();
         assertThat(delts).hasSize(6);
         assertThat(delts.get(0).getPath().toString()).isEqualTo("mock:/tbl/part1/delete_delta_40_60");
@@ -390,10 +396,10 @@ public class TestHiveAcidUtils
                 new MockFile("mock:/tbl/part1/delta_40_60/bucket_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/delete_delta_50_50/bucket_0", 500, new byte[0]));
         Path part = new MockPath(fs, "mock:/tbl/part1");
-        AcidUtils.Directory dir = AcidUtils.getAcidState(part, conf, new ValidReaderWriteIdList("tbl:100:" + Long.MAX_VALUE + ":"));
-        List<FileStatus> obsolete = dir.getObsolete();
+        AcidDirectory dir = getAcidState(part, conf, ValidReaderWriteIdList.fromValue("tbl:100:" + Long.MAX_VALUE + ":"));
+        List<Path> obsolete = dir.getObsolete();
         assertThat(obsolete).hasSize(1);
-        assertThat(obsolete.get(0).getPath().toString()).isEqualTo("mock:/tbl/part1/delete_delta_50_50");
+        assertThat(obsolete.get(0).toString()).isEqualTo("mock:/tbl/part1/delete_delta_50_50");
         List<AcidUtils.ParsedDelta> delts = dir.getCurrentDirectories();
         assertThat(delts).hasSize(1);
         assertThat(delts.get(0).getPath().toString()).isEqualTo("mock:/tbl/part1/delta_40_60");
@@ -415,7 +421,7 @@ public class TestHiveAcidUtils
                 new MockFile("mock:/tbl/part1/delete_delta_7_7/bucket_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/delta_6_10/bucket_0", 500, new byte[0]));
         Path part = new MockPath(fs, "mock:/tbl/part1");
-        AcidUtils.Directory dir = AcidUtils.getAcidState(part, conf, new ValidCompactorWriteIdList("tbl:4:" + Long.MAX_VALUE + ":"));
+        AcidDirectory dir = getAcidState(part, conf, ValidCompactorWriteIdList.fromValue("tbl:4:" + Long.MAX_VALUE + ":"));
         List<AcidUtils.ParsedDelta> delts = dir.getCurrentDirectories();
         assertThat(delts).hasSize(2);
         assertThat(delts.get(0).getPath().toString()).isEqualTo("mock:/tbl/part1/delta_1_1");
@@ -436,7 +442,7 @@ public class TestHiveAcidUtils
                 new MockFile("mock:/tbl/part1/delta_4_4_3/bucket_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/delta_101_101_1/bucket_0", 500, new byte[0]));
         Path part = new MockPath(fs, "mock:/tbl/part1");
-        AcidUtils.Directory dir = AcidUtils.getAcidState(part, conf, new ValidReaderWriteIdList("tbl:100:4:4"));
+        AcidDirectory dir = getAcidState(part, conf, ValidReaderWriteIdList.fromValue("tbl:100:4:4"));
         List<AcidUtils.ParsedDelta> delts = dir.getCurrentDirectories();
         assertThat(delts).hasSize(3);
         assertThat(delts.get(0).getPath().toString()).isEqualTo("mock:/tbl/part1/delta_1_1");
@@ -469,13 +475,30 @@ public class TestHiveAcidUtils
                 new MockFile("mock:/tbl/part1/delete_delta_029_029/delete_delta_029_029/bucket_0", 500, new byte[0]));
 
         Path part = new MockPath(fs, "mock:/tbl/part1");
-        AcidUtils.Directory dir = AcidUtils.getAcidState(part, conf, new ValidReaderWriteIdList("tbl:100:" + Long.MAX_VALUE + ":"));
+        AcidDirectory dir = getAcidState(part, conf, ValidReaderWriteIdList.fromValue("tbl:100:" + Long.MAX_VALUE + ":"));
         assertThat(dir.getBaseDirectory().toString()).isEqualTo("mock:/tbl/part1/base_1");
-        List<FileStatus> obsolete = dir.getObsolete();
-        assertThat(obsolete).isEmpty();
+        List<Path> obsolete = dir.getObsolete();
+        // Nested delta/delete_delta directories are still skipped, but Hive 4 reports a base nested
+        // inside the selected base as obsolete instead of ignoring it
+        assertThat(obsolete).hasSize(1);
+        assertThat(obsolete.get(0).toString()).isEqualTo("mock:/tbl/part1/base_1/base_1");
+        // Hive 4 builds the directory state from a recursive listing, so nested delta and delete_delta
+        // directories are surfaced as current directories instead of being skipped as they were in Hive 3
         List<AcidUtils.ParsedDelta> delts = dir.getCurrentDirectories();
-        assertThat(delts).hasSize(2);
+        assertThat(delts).hasSize(4);
         assertThat(delts.get(0).getPath().toString()).isEqualTo("mock:/tbl/part1/delta_025_025");
-        assertThat(delts.get(1).getPath().toString()).isEqualTo("mock:/tbl/part1/delete_delta_029_029");
+        assertThat(delts.get(1).getPath().toString()).isEqualTo("mock:/tbl/part1/delta_025_025/delta_025_025");
+        assertThat(delts.get(2).getPath().toString()).isEqualTo("mock:/tbl/part1/delete_delta_029_029");
+        assertThat(delts.get(3).getPath().toString()).isEqualTo("mock:/tbl/part1/delete_delta_029_029/delete_delta_029_029");
+    }
+
+    private static AcidDirectory getAcidState(Path path, Configuration conf, ValidWriteIdList writeIdList)
+            throws IOException
+    {
+        // Hive 4 screens every directory through isDirUsable, which reads a ValidTxnList out of the
+        // configuration and rejects the directory outright when it is absent. These tests cover write id
+        // selection rather than transaction visibility, so every transaction is treated as valid.
+        conf.set(ValidTxnList.VALID_TXNS_KEY, new ValidReadTxnList().writeToString());
+        return AcidUtils.getAcidState(path.getFileSystem(conf), path, conf, writeIdList, Ref.from(false), false);
     }
 }
