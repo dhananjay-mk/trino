@@ -13,7 +13,6 @@
  */
 package io.trino.plugin.redshift;
 
-import com.amazon.redshift.Driver;
 import com.google.inject.Binder;
 import com.google.inject.Key;
 import com.google.inject.Provides;
@@ -94,7 +93,10 @@ public class RedshiftClientModule
         properties.put("reWriteBatchedInserts", "true");
         properties.put("reWriteBatchedInsertsSize", "512");
 
-        return DriverConnectionFactory.builder(new Driver(), config.getConnectionUrl(), credentialProvider)
+        return DriverConnectionFactory.builder(
+                        new LegacyRedshiftDriver(),
+                        config.getConnectionUrl(),
+                        credentialProvider)
                 .setConnectionProperties(properties)
                 .setOpenTelemetry(openTelemetry)
                 .build();

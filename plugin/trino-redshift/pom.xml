@@ -18,8 +18,9 @@
         <dependency>
             <groupId>com.amazon.redshift</groupId>
             <artifactId>redshift-jdbc42</artifactId>
-            <!-- TODO upgrade once https://github.com/aws/amazon-redshift-jdbc-driver/issues/148 has been addressed -->
-            <version>2.1.0.30</version>
+            <!-- Issue https://github.com/aws/amazon-redshift-jdbc-driver/issues/148 is worked around
+                 by LegacyRedshiftDriver, which forces the pre-SHOW metadata path. -->
+            <version>2.2.8</version>
         </dependency>
 
         <dependency>
