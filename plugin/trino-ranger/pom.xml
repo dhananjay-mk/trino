@@ -232,6 +232,18 @@
             </exclusions>
         </dependency>
 
+        <!--
+            ranger-audit-dest-solr is intentionally omitted, along with the five Jetty 11
+            runtime declarations that existed only to replace the Jetty pulled in by its
+            solr-solrj dependency. jetty-http 11.0.26 is affected by CVE-2026-2332 with no
+            fix available: the advisory names 11.0.29, but 11.0.26 is the last public Jetty
+            11 release (Jetty 11 is EOL). Solr auditing is therefore unavailable in this
+            build - setting xasecure.audit.solr.is.enabled or
+            xasecure.audit.destination.solr fails coordinator startup, since Ranger loads
+            the audit destination reflectively and wraps the ClassNotFoundException in a
+            RuntimeException. The other audit destinations are unaffected.
+        -->
+
         <dependency>
             <groupId>org.apache.zookeeper</groupId>
             <artifactId>zookeeper</artifactId>
