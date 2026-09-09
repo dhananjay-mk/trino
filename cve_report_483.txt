@@ -1,0 +1,11 @@
+Image	CVE / Advisory	CVSS	Severity	Package	Installed Version	Fixed Version	Path
+hopsworks/trino:483-test	CVE-2026-39821	8.2	High	stdlib	v1.26.5	1.25.13, 1.26.6, 1.27.0-rc.3	
+hopsworks/trino:483-test	CVE-2026-54399	7.5	High	org.apache.httpcomponents.core5:httpcore5	5.3.4	5.4.3, 5.5-beta2	usr/lib/trino/plugin/clickhouse/com.clickhouse_clickhouse-jdbc-0.9.8-all.jar
+hopsworks/trino:483-test	CVE-2026-54428	7.5	High	org.apache.httpcomponents.core5:httpcore5-h2	5.3.4	5.4.3, 5.5-beta2	usr/lib/trino/plugin/clickhouse/com.clickhouse_clickhouse-jdbc-0.9.8-all.jar
+hopsworks/trino:483-test	CVE-2026-33818	7.5	High	stdlib	v1.26.5	1.25.13, 1.26.6, 1.27.0-rc.3	
+hopsworks/trino:483-test	CVE-2026-46600	7.5	High	stdlib	v1.26.5	1.26.6, 1.27.0-rc.3	
+hopsworks/trino:483-test	CVE-2026-56853	7.5	High	stdlib	v1.26.5	1.25.13, 1.26.6, 1.27.0-rc.3	
+hopsworks/trino:483-test	CVE-2026-56859	7.5	High	stdlib	v1.26.5	1.25.13, 1.26.6, 1.27.0-rc.3	
+hopsworks/trino:483-test	CVE-2026-56862	7.5	High	stdlib	v1.26.5	1.25.13, 1.26.6, 1.27.0-rc.3	
+hopsworks/trino:483-test	CVE-2026-56858	6.1	High	stdlib	v1.26.5	1.25.13, 1.26.6, 1.27.0-rc.3	
+hopsworks/trino:483-test	CVE-2026-56860	5.9	High	stdlib	v1.26.5	1.25.13, 1.26.6, 1.27.0-rc.3	
