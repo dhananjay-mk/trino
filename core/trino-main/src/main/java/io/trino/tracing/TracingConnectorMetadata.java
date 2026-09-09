@@ -183,11 +183,11 @@ public class TracingConnectorMetadata
     }
 
     @Override
-    public void finishTableExecute(ConnectorSession session, ConnectorTableExecuteHandle tableExecuteHandle, Collection<Slice> fragments, List<Object> tableExecuteState)
+    public Map<String, Long> finishTableExecute(ConnectorSession session, ConnectorTableExecuteHandle tableExecuteHandle, Collection<Slice> fragments, List<Object> tableExecuteState)
     {
         Span span = startSpan("finishTableExecute", tableExecuteHandle);
         try (var _ = scopedSpan(span)) {
-            delegate.finishTableExecute(session, tableExecuteHandle, fragments, tableExecuteState);
+            return delegate.finishTableExecute(session, tableExecuteHandle, fragments, tableExecuteState);
         }
     }
 
@@ -748,11 +748,11 @@ public class TracingConnectorMetadata
     }
 
     @Override
-    public Optional<ConnectorOutputMetadata> finishRefreshMaterializedView(ConnectorSession session, ConnectorTableHandle tableHandle, ConnectorInsertTableHandle insertHandle, Collection<Slice> fragments, Collection<ComputedStatistics> computedStatistics, List<ConnectorTableHandle> sourceTableHandles, boolean hasForeignSourceTables, boolean hasSourceTableFunctions)
+    public Optional<ConnectorOutputMetadata> finishRefreshMaterializedView(ConnectorSession session, ConnectorTableHandle tableHandle, ConnectorInsertTableHandle insertHandle, Collection<Slice> fragments, Collection<ComputedStatistics> computedStatistics, List<ConnectorTableHandle> sourceTableHandles, boolean hasForeignSourceTables, boolean hasSourceTableFunctions, boolean hasNonDeterministicFunctions)
     {
         Span span = startSpan("finishRefreshMaterializedView", tableHandle);
         try (var _ = scopedSpan(span)) {
-            return delegate.finishRefreshMaterializedView(session, tableHandle, insertHandle, fragments, computedStatistics, sourceTableHandles, hasForeignSourceTables, hasSourceTableFunctions);
+            return delegate.finishRefreshMaterializedView(session, tableHandle, insertHandle, fragments, computedStatistics, sourceTableHandles, hasForeignSourceTables, hasSourceTableFunctions, hasNonDeterministicFunctions);
         }
     }
 
@@ -1532,6 +1532,15 @@ public class TracingConnectorMetadata
         }
     }
 
+    @Override
+    public Optional<ConnectorTableCredentials> getTableCredentials(ConnectorSession session, ConnectorTableFunctionHandle tableFunctionHandle)
+    {
+        Span span = startSpan("getTableCredentials", tableFunctionHandle);
+        try (var _ = scopedSpan(span)) {
+            return delegate.getTableCredentials(session, tableFunctionHandle);
+        }
+    }
+
     private Span startSpan(String methodName)
     {
         return tracer.spanBuilder("ConnectorMetadata." + methodName)
@@ -1575,6 +1584,15 @@ public class TracingConnectorMetadata
     }
 
     private Span startSpan(String methodName, ConnectorTableHandle handle)
+    {
+        Span span = startSpan(methodName);
+        if (span.isRecording()) {
+            span.setAttribute(TrinoAttributes.HANDLE, handle.toString());
+        }
+        return span;
+    }
+
+    private Span startSpan(String methodName, ConnectorTableFunctionHandle handle)
     {
         Span span = startSpan(methodName);
         if (span.isRecording()) {

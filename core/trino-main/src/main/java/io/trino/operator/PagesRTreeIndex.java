@@ -13,8 +13,6 @@
  */
 package io.trino.operator;
 
-import com.esri.core.geometry.ogc.OGCGeometry;
-import com.esri.core.geometry.ogc.OGCPoint;
 import io.airlift.slice.Slice;
 import io.trino.Session;
 import io.trino.geospatial.Rectangle;
@@ -29,6 +27,8 @@ import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.longs.LongArrayList;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import org.locationtech.jts.geom.Envelope;
+import org.locationtech.jts.geom.Geometry;
+import org.locationtech.jts.geom.Point;
 import org.locationtech.jts.index.strtree.STRtree;
 
 import java.util.List;
@@ -40,7 +40,9 @@ import java.util.OptionalInt;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Verify.verifyNotNull;
 import static io.airlift.slice.SizeOf.instanceSize;
-import static io.trino.geospatial.serde.GeometrySerde.deserialize;
+import static io.trino.geospatial.GeometryUtils.estimateMemorySize;
+import static io.trino.geospatial.serde.JtsGeometrySerde.deserialize;
+import static io.trino.geospatial.serde.JtsGeometrySerde.validateAndGetSrid;
 import static io.trino.operator.SyntheticAddress.decodePosition;
 import static io.trino.operator.SyntheticAddress.decodeSliceIndex;
 import static io.trino.operator.join.JoinUtils.channelsToPages;
@@ -57,6 +59,7 @@ public class PagesRTreeIndex
     private final List<Integer> outputChannels;
     private final List<ObjectArrayList<Block>> channels;
     private final STRtree rtree;
+    private final SpatialIndexSridState sridState;
     private final int radiusChannel;
     private final OptionalDouble constantRadius;
     private final SpatialPredicate spatialRelationshipTest;
@@ -67,20 +70,20 @@ public class PagesRTreeIndex
     {
         private static final int INSTANCE_SIZE = instanceSize(GeometryWithPosition.class);
 
-        private final OGCGeometry ogcGeometry;
+        private final Geometry geometry;
         private final int partition;
         private final int position;
 
-        public GeometryWithPosition(OGCGeometry ogcGeometry, int partition, int position)
+        public GeometryWithPosition(Geometry geometry, int partition, int position)
         {
-            this.ogcGeometry = requireNonNull(ogcGeometry, "ogcGeometry is null");
+            this.geometry = requireNonNull(geometry, "geometry is null");
             this.partition = partition;
             this.position = position;
         }
 
-        public OGCGeometry getGeometry()
+        public Geometry getGeometry()
         {
-            return ogcGeometry;
+            return geometry;
         }
 
         public int getPartition()
@@ -95,7 +98,7 @@ public class PagesRTreeIndex
 
         public long getEstimatedMemorySizeInBytes()
         {
-            return INSTANCE_SIZE + ogcGeometry.estimateMemorySize();
+            return INSTANCE_SIZE + estimateMemorySize(geometry);
         }
     }
 
@@ -105,6 +108,7 @@ public class PagesRTreeIndex
             List<Integer> outputChannels,
             List<ObjectArrayList<Block>> channels,
             STRtree rtree,
+            SpatialIndexSridState sridState,
             OptionalInt radiusChannel,
             OptionalDouble constantRadius,
             SpatialPredicate spatialRelationshipTest,
@@ -115,6 +119,7 @@ public class PagesRTreeIndex
         this.outputChannels = outputChannels;
         this.channels = requireNonNull(channels, "channels is null");
         this.rtree = requireNonNull(rtree, "rtree is null");
+        this.sridState = requireNonNull(sridState, "sridState is null");
         this.radiusChannel = radiusChannel.orElse(-1);
         this.constantRadius = requireNonNull(constantRadius, "constantRadius is null");
         this.spatialRelationshipTest = requireNonNull(spatialRelationshipTest, "spatialRelationshipTest is null");
@@ -124,12 +129,9 @@ public class PagesRTreeIndex
         checkArgument(!(constantRadius.isPresent() && radiusChannel.isPresent()), "Radius channel and constant radius are mutually exclusive");
     }
 
-    private static Envelope getEnvelope(OGCGeometry ogcGeometry)
+    private static Envelope getEnvelope(Geometry geometry)
     {
-        com.esri.core.geometry.Envelope env = new com.esri.core.geometry.Envelope();
-        ogcGeometry.getEsriGeometry().queryEnvelope(env);
-
-        return new Envelope(env.getXMin(), env.getXMax(), env.getYMin(), env.getYMax());
+        return geometry.getEnvelopeInternal();
     }
 
     /**
@@ -153,21 +155,23 @@ public class PagesRTreeIndex
         int probePartition = probePartitionChannel.isPresent() ? INTEGER.getInt(probe.getBlock(probePartitionChannel.getAsInt()), position) : -1;
 
         Slice slice = probeGeometryBlock.getSlice(probePosition);
-        OGCGeometry probeGeometry = deserialize(slice);
+        Geometry probeGeometry = deserialize(slice);
         verifyNotNull(probeGeometry);
         if (probeGeometry.isEmpty()) {
             return EMPTY_ADDRESSES;
         }
+        sridState.validateProbe(probeGeometry.getSRID());
 
-        boolean probeIsPoint = probeGeometry instanceof OGCPoint;
+        boolean probeIsPoint = probeGeometry instanceof Point;
 
         IntArrayList matchingPositions = new IntArrayList();
 
         Envelope envelope = getEnvelope(probeGeometry);
         rtree.query(envelope, item -> {
             GeometryWithPosition geometryWithPosition = (GeometryWithPosition) item;
-            OGCGeometry buildGeometry = geometryWithPosition.getGeometry();
-            if (partitions.isEmpty() || (probePartition == geometryWithPosition.getPartition() && (probeIsPoint || (buildGeometry instanceof OGCPoint) || testReferencePoint(envelope, buildGeometry, probePartition)))) {
+            Geometry buildGeometry = geometryWithPosition.getGeometry();
+            if (partitions.isEmpty() || (probePartition == geometryWithPosition.getPartition() && (probeIsPoint || (buildGeometry instanceof Point) || testReferencePoint(envelope, buildGeometry, probePartition)))) {
+                validateAndGetSrid(buildGeometry, probeGeometry);
                 if (radiusChannel == -1 && constantRadius.isEmpty()) {
                     if (spatialRelationshipTest.apply(buildGeometry, probeGeometry, OptionalDouble.empty())) {
                         matchingPositions.add(geometryWithPosition.getPosition());
@@ -178,7 +182,7 @@ public class PagesRTreeIndex
                     if (radius.isEmpty()) {
                         radius = OptionalDouble.of(getRadius(geometryWithPosition.getPosition()));
                     }
-                    if (spatialRelationshipTest.apply(geometryWithPosition.getGeometry(), probeGeometry, radius)) {
+                    if (spatialRelationshipTest.apply(buildGeometry, probeGeometry, radius)) {
                         matchingPositions.add(geometryWithPosition.getPosition());
                     }
                 }
@@ -188,7 +192,7 @@ public class PagesRTreeIndex
         return matchingPositions.toIntArray();
     }
 
-    private boolean testReferencePoint(Envelope probeEnvelope, OGCGeometry buildGeometry, int partition)
+    private boolean testReferencePoint(Envelope probeEnvelope, Geometry buildGeometry, int partition)
     {
         Envelope buildEnvelope = getEnvelope(buildGeometry);
         Envelope intersection = buildEnvelope.intersection(probeEnvelope);

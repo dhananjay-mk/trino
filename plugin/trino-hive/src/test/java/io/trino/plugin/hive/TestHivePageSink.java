@@ -41,6 +41,7 @@ import io.trino.spi.connector.ConnectorPageSource;
 import io.trino.spi.connector.ConnectorSession;
 import io.trino.spi.connector.ConnectorTableHandle;
 import io.trino.spi.connector.DynamicFilter;
+import io.trino.spi.connector.MemoryContext;
 import io.trino.spi.connector.SchemaTableName;
 import io.trino.spi.connector.SourcePage;
 import io.trino.spi.security.ConnectorIdentity;
@@ -131,6 +132,10 @@ public class TestHivePageSink
             }
             if (format == HiveStorageFormat.ESRI) {
                 // ESRI format is readonly
+                continue;
+            }
+            if (format == HiveStorageFormat.ESRI_GEO_JSON) {
+                // ESRI_GEO_JSON format is readonly
                 continue;
             }
             if (format == HiveStorageFormat.SEQUENCEFILE_PROTOBUF) {
@@ -293,9 +298,9 @@ public class TestHivePageSink
         List<Type> columnTypes = columns.stream()
                 .map(LineItemColumn::getType)
                 .map(TestHivePageSink::getType)
-                .map(hiveType -> TESTING_TYPE_MANAGER.getType(hiveType.getTypeSignature()))
+                .map(hiveType -> TESTING_TYPE_MANAGER.getType(hiveType.getTypeDescriptor()))
                 .collect(toList());
-        Page page = createPage(lineItem -> true);
+        Page page = createPage(_ -> true);
         pageSink.appendPage(page);
         getFutureValue(pageSink.finish());
 
@@ -331,7 +336,7 @@ public class TestHivePageSink
         List<Type> columnTypes = columns.stream()
                 .map(LineItemColumn::getType)
                 .map(TestHivePageSink::getType)
-                .map(hiveType -> TESTING_TYPE_MANAGER.getType(hiveType.getTypeSignature()))
+                .map(hiveType -> TESTING_TYPE_MANAGER.getType(hiveType.getTypeDescriptor()))
                 .collect(toList());
         PageBuilder pageBuilder = new PageBuilder(columnTypes);
         int rows = 0;
@@ -348,23 +353,24 @@ public class TestHivePageSink
                 LineItemColumn column = columns.get(i);
                 BlockBuilder blockBuilder = pageBuilder.getBlockBuilder(i);
                 switch (column.getType().getBase()) {
-                    case IDENTIFIER:
+                    case IDENTIFIER -> {
                         BIGINT.writeLong(blockBuilder, column.getIdentifier(lineItem));
-                        break;
-                    case INTEGER:
+                    }
+                    case INTEGER -> {
                         INTEGER.writeLong(blockBuilder, column.getInteger(lineItem));
-                        break;
-                    case DATE:
+                    }
+                    case DATE -> {
                         DATE.writeLong(blockBuilder, column.getDate(lineItem));
-                        break;
-                    case DOUBLE:
+                    }
+                    case DOUBLE -> {
                         DOUBLE.writeDouble(blockBuilder, column.getDouble(lineItem));
-                        break;
-                    case VARCHAR:
+                    }
+                    case VARCHAR -> {
                         createUnboundedVarcharType().writeSlice(blockBuilder, Slices.utf8Slice(column.getString(lineItem)));
-                        break;
-                    default:
+                    }
+                    default -> {
                         throw new IllegalArgumentException("Unsupported type " + column.getType());
+                    }
                 }
             }
         }
@@ -400,6 +406,7 @@ public class TestHivePageSink
                 new Schema(config.getHiveStorageFormat().getSerde(), false, splitProperties),
                 ImmutableList.of(),
                 ImmutableList.of(),
+                Optional.empty(),
                 OptionalInt.empty(),
                 OptionalInt.empty(),
                 false,
@@ -413,7 +420,7 @@ public class TestHivePageSink
                 TESTING_TYPE_MANAGER,
                 config,
                 getDefaultHivePageSourceFactories(fileSystemFactory, config));
-        return provider.createPageSource(transaction, getHiveSession(config), split, table, ImmutableList.copyOf(getColumnHandles()), DynamicFilter.EMPTY);
+        return provider.createPageSource(transaction, getHiveSession(config), split, table, Optional.empty(), ImmutableList.copyOf(getColumnHandles()), DynamicFilter.EMPTY, MemoryContext.NO_LIMIT);
     }
 
     private static ConnectorPageSink createPageSink(
@@ -480,7 +487,7 @@ public class TestHivePageSink
                 new HiveLocationService(HDFS_FILE_SYSTEM_FACTORY, config),
                 partitionUpdateCodec,
                 stats);
-        return provider.createPageSink(transaction, getHiveSession(config), handle, TESTING_PAGE_SINK_ID);
+        return provider.createPageSink(transaction, getHiveSession(config), handle, Optional.empty(), TESTING_PAGE_SINK_ID);
     }
 
     private static List<HiveColumnHandle> getColumnHandles()

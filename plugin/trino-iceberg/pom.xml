@@ -5,7 +5,7 @@
     <parent>
         <groupId>io.trino</groupId>
         <artifactId>trino-root</artifactId>
-        <version>480</version>
+        <version>483</version>
         <relativePath>../../pom.xml</relativePath>
     </parent>
 
@@ -16,7 +16,8 @@
 
     <properties>
         <!-- Nessie version (compatible with Iceberg release) must be bumped along with Iceberg version bump to avoid compatibility issues -->
-        <dep.nessie.version>0.107.4</dep.nessie.version>
+        <dep.nessie.version>0.108.1</dep.nessie.version>
+        <dep.keycloak.version>26.0.8</dep.keycloak.version>
     </properties>
 
     <dependencyManagement>
@@ -93,6 +94,18 @@
         </dependency>
 
         <dependency>
+            <groupId>io.hops.hadoop</groupId>
+            <artifactId>hadoop-apache</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>io.hops.hive</groupId>
+            <artifactId>hive-apache</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
             <groupId>io.jsonwebtoken</groupId>
             <artifactId>jjwt-api</artifactId>
         </dependency>
@@ -125,6 +138,11 @@
         <dependency>
             <groupId>io.trino</groupId>
             <artifactId>trino-filesystem-s3</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>io.trino</groupId>
+            <artifactId>trino-geospatial-toolkit</artifactId>
         </dependency>
 
         <dependency>
@@ -217,6 +235,12 @@
         <dependency>
             <groupId>org.apache.iceberg</groupId>
             <artifactId>iceberg-aws</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.iceberg</groupId>
+            <artifactId>iceberg-azure</artifactId>
+            <version>${dep.iceberg.version}</version>
         </dependency>
 
         <dependency>
@@ -376,6 +400,30 @@
         </dependency>
 
         <dependency>
+            <groupId>org.locationtech.jts</groupId>
+            <artifactId>jts-core</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.azure</groupId>
+            <artifactId>azure-security-keyvault-keys</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.azure</groupId>
+            <artifactId>azure-storage-blob</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.azure</groupId>
+            <artifactId>azure-storage-common</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <dependency>
             <groupId>com.google.auth</groupId>
             <artifactId>google-auth-library-oauth2-http</artifactId>
             <scope>runtime</scope>
@@ -385,6 +433,29 @@
                     <artifactId>javax.annotation-api</artifactId>
                 </exclusion>
             </exclusions>
+        </dependency>
+
+        <dependency>
+            <groupId>com.google.cloud</groupId>
+            <artifactId>google-cloud-kms</artifactId>
+            <scope>runtime</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>com.google.guava</groupId>
+                    <artifactId>listenablefuture</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>javax.annotation</groupId>
+                    <artifactId>javax.annotation-api</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
+            <groupId>com.google.cloud.gcs.analytics</groupId>
+            <artifactId>gcs-analytics-core</artifactId>
+            <version>1.2.3</version>
+            <scope>runtime</scope>
         </dependency>
 
         <dependency>
@@ -414,6 +485,12 @@
         <dependency>
             <groupId>io.opentelemetry</groupId>
             <artifactId>opentelemetry-sdk-trace</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>io.trino</groupId>
+            <artifactId>trino-filesystem-azure</artifactId>
             <scope>runtime</scope>
         </dependency>
 
@@ -468,9 +545,39 @@
         </dependency>
 
         <dependency>
-            <groupId>software.amazon.awssdk</groupId>
-            <artifactId>s3</artifactId>
-            <scope>runtime</scope>
+            <groupId>com.azure</groupId>
+            <artifactId>azure-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.azure</groupId>
+            <artifactId>azure-core-http-netty</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.google.api</groupId>
+            <artifactId>gax</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.google.api</groupId>
+            <artifactId>gax-grpc</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.google.api.grpc</groupId>
+            <artifactId>proto-google-cloud-kms-v1</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.google.protobuf</groupId>
+            <artifactId>protobuf-java</artifactId>
+            <scope>test</scope>
         </dependency>
 
         <dependency>
@@ -498,14 +605,14 @@
         </dependency>
 
         <dependency>
-            <groupId>io.hops.hadoop</groupId>
-            <artifactId>hadoop-apache</artifactId>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-api</artifactId>
             <scope>test</scope>
         </dependency>
 
         <dependency>
-            <groupId>io.hops.hive</groupId>
-            <artifactId>hive-apache</artifactId>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-netty-shaded</artifactId>
             <scope>test</scope>
         </dependency>
 
@@ -516,8 +623,32 @@
         </dependency>
 
         <dependency>
+            <groupId>io.netty</groupId>
+            <artifactId>netty-handler</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
             <groupId>io.opentelemetry</groupId>
             <artifactId>opentelemetry-sdk-testing</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>io.projectreactor</groupId>
+            <artifactId>reactor-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>io.projectreactor.netty</groupId>
+            <artifactId>reactor-netty-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>io.projectreactor.netty</groupId>
+            <artifactId>reactor-netty-http</artifactId>
             <scope>test</scope>
         </dependency>
 
@@ -544,6 +675,12 @@
             <groupId>io.trino</groupId>
             <artifactId>trino-filesystem</artifactId>
             <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>io.trino</groupId>
+            <artifactId>trino-geospatial</artifactId>
             <scope>test</scope>
         </dependency>
 
@@ -668,25 +805,34 @@
 
         <dependency>
             <groupId>org.keycloak</groupId>
-            <artifactId>keycloak-admin-client-jakarta</artifactId>
-            <version>21.1.2</version>
+            <artifactId>keycloak-admin-client</artifactId>
+            <version>${dep.keycloak.version}</version>
             <scope>test</scope>
             <exclusions>
                 <exclusion>
-                    <groupId>com.sun.xml.bind</groupId>
-                    <artifactId>*</artifactId>
-                </exclusion>
-                <exclusion>
+                    <!-- Brings in duplicate classes already in jakarta.ws.rs:jakarta.ws.rs-api -->
                     <groupId>org.jboss.spec.javax.ws.rs</groupId>
                     <artifactId>jboss-jaxrs-api_3.0_spec</artifactId>
+                </exclusion>
+                <exclusion>
+                    <!-- Brings in duplicate classes already in keycloak-core and keycloak-common -->
+                    <groupId>org.keycloak</groupId>
+                    <artifactId>keycloak-client-common-synced</artifactId>
                 </exclusion>
             </exclusions>
         </dependency>
 
         <dependency>
             <groupId>org.keycloak</groupId>
+            <artifactId>keycloak-common</artifactId>
+            <version>${dep.keycloak.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.keycloak</groupId>
             <artifactId>keycloak-core</artifactId>
-            <version>24.0.5</version>
+            <version>${dep.keycloak.version}</version>
             <scope>test</scope>
         </dependency>
 
@@ -698,7 +844,25 @@
 
         <dependency>
             <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
             <artifactId>testcontainers-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>retries-spi</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
             <scope>test</scope>
         </dependency>
 
@@ -726,10 +890,16 @@
                     <configuration>
                         <rules>
                             <bannedDependencies>
-                                <includes combine.children="append">
-                                    <!-- Legacy HDFS file system uses AWS S3 SDK v1 -->
-                                    <include>com.amazonaws:*:*</include>
-                                </includes>
+                                <!-- HadoopTables depends on hadoop-apache -->
+                                <searchTransitive>false</searchTransitive>
+                                <excludes combine.children="append">
+                                    <exclude>io.trino.hadoop:hadoop-apache</exclude>
+                                </excludes>
+                            </bannedDependencies>
+                            <bannedDependencies>
+                                <excludes combine.children="append">
+                                    <exclude>io.trino.hive:hive-apache</exclude>
+                                </excludes>
                             </bannedDependencies>
                         </rules>
                     </configuration>
@@ -767,6 +937,16 @@
                     </ignoredClassPatterns>
                 </configuration>
             </plugin>
+            <plugin>
+                <artifactId>maven-jar-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>test-jar</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 
@@ -784,20 +964,16 @@
                         <configuration>
                             <excludes>
                                 <exclude>**/Test*Avro*.java</exclude>
-                                <exclude>**/Test*Minio*.java</exclude>
-                                <exclude>**/TestIcebergGlueCatalogConnectorSmokeTest.java</exclude>
-                                <exclude>**/TestTrinoGlueCatalog.java</exclude>
-                                <exclude>**/TestSharedGlueMetastore.java</exclude>
-                                <exclude>**/TestIcebergGlueCatalogAccessOperations.java</exclude>
-                                <exclude>**/TestIcebergGlueCatalogMaterializedView.java</exclude>
-                                <exclude>**/TestIcebergGlueCreateTableFailure.java</exclude>
-                                <exclude>**/TestIcebergGlueTableOperationsInsertFailure.java</exclude>
-                                <exclude>**/TestIcebergGlueCatalogSkipArchive.java</exclude>
-                                <exclude>**/TestIcebergS3AndGlueMetastoreTest.java</exclude>
+                                <exclude>**/Test*Floci*.java</exclude>
+                                <exclude>**/TestIcebergS3AndGlueAws.java</exclude>
                                 <exclude>**/TestIcebergS3TablesConnectorSmokeTest.java</exclude>
                                 <exclude>**/TestIcebergBigLakeMetastoreConnectorSmokeTest.java</exclude>
                                 <exclude>**/TestIcebergGcsConnectorSmokeTest.java</exclude>
                                 <exclude>**/TestIcebergGcsVendingRestCatalogConnectorSmokeTest.java</exclude>
+                                <exclude>**/TestIcebergGcsRestCatalogVendedCredentialsRefresh.java</exclude>
+                                <exclude>**/TestIcebergGcsRestCatalogStorageCredentialsRefresh.java</exclude>
+                                <exclude>**/TestIcebergAbfsVendingRestCatalogConnectorSmokeTest.java</exclude>
+                                <exclude>**/TestIcebergAzureRestCatalogVendedCredentialsRefresh.java</exclude>
                                 <exclude>**/TestIcebergAbfsConnectorSmokeTest.java</exclude>
                                 <exclude>**/Test*FailureRecoveryTest.java</exclude>
                                 <exclude>**/TestIcebergSnowflakeCatalogConnectorSmokeTest.java</exclude>
@@ -827,7 +1003,7 @@
         </profile>
 
         <profile>
-            <id>minio-and-avro</id>
+            <id>floci-and-avro</id>
             <build>
                 <plugins>
                     <plugin>
@@ -836,7 +1012,7 @@
                         <configuration>
                             <includes>
                                 <include>**/Test*Avro*.java</include>
-                                <include>**/Test*Minio*.java</include>
+                                <include>**/Test*Floci*.java</include>
                             </includes>
                         </configuration>
                     </plugin>
@@ -853,19 +1029,14 @@
                         <artifactId>maven-surefire-plugin</artifactId>
                         <configuration>
                             <includes>
-                                <include>**/TestIcebergGlueCatalogConnectorSmokeTest.java</include>
-                                <include>**/TestTrinoGlueCatalog.java</include>
-                                <include>**/TestSharedGlueMetastore.java</include>
-                                <include>**/TestIcebergGlueCatalogAccessOperations.java</include>
-                                <include>**/TestIcebergGlueCatalogMaterializedView.java</include>
-                                <include>**/TestIcebergGlueCreateTableFailure.java</include>
-                                <include>**/TestIcebergGlueTableOperationsInsertFailure.java</include>
-                                <include>**/TestIcebergGlueCatalogSkipArchive.java</include>
-                                <include>**/TestIcebergS3AndGlueMetastoreTest.java</include>
                                 <include>**/TestIcebergS3TablesConnectorSmokeTest.java</include>
                                 <include>**/TestIcebergBigLakeMetastoreConnectorSmokeTest.java</include>
                                 <include>**/TestIcebergGcsConnectorSmokeTest.java</include>
                                 <include>**/TestIcebergGcsVendingRestCatalogConnectorSmokeTest.java</include>
+                                <include>**/TestIcebergGcsRestCatalogVendedCredentialsRefresh.java</include>
+                                <include>**/TestIcebergGcsRestCatalogStorageCredentialsRefresh.java</include>
+                                <include>**/TestIcebergAbfsVendingRestCatalogConnectorSmokeTest.java</include>
+                                <include>**/TestIcebergAzureRestCatalogVendedCredentialsRefresh.java</include>
                                 <include>**/TestIcebergAbfsConnectorSmokeTest.java</include>
                                 <include>**/TestIcebergSnowflakeCatalogConnectorSmokeTest.java</include>
                                 <include>**/TestTrinoSnowflakeCatalog.java</include>

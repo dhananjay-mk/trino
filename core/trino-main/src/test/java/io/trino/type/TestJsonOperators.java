@@ -27,6 +27,7 @@ import org.junit.jupiter.api.parallel.Execution;
 import static io.trino.spi.StandardErrorCode.INVALID_CAST_ARGUMENT;
 import static io.trino.spi.StandardErrorCode.INVALID_FUNCTION_ARGUMENT;
 import static io.trino.spi.StandardErrorCode.INVALID_LITERAL;
+import static io.trino.spi.StandardErrorCode.NUMERIC_VALUE_OUT_OF_RANGE;
 import static io.trino.spi.StandardErrorCode.TYPE_MISMATCH;
 import static io.trino.spi.function.OperatorType.EQUAL;
 import static io.trino.spi.function.OperatorType.INDETERMINATE;
@@ -35,6 +36,7 @@ import static io.trino.spi.type.BooleanType.BOOLEAN;
 import static io.trino.spi.type.DecimalType.createDecimalType;
 import static io.trino.spi.type.DoubleType.DOUBLE;
 import static io.trino.spi.type.IntegerType.INTEGER;
+import static io.trino.spi.type.NumberType.NUMBER;
 import static io.trino.spi.type.RealType.REAL;
 import static io.trino.spi.type.SmallintType.SMALLINT;
 import static io.trino.spi.type.SqlDecimal.decimal;
@@ -56,8 +58,6 @@ import static org.junit.jupiter.api.parallel.ExecutionMode.CONCURRENT;
 @Execution(CONCURRENT)
 public class TestJsonOperators
 {
-    // Some of the tests in this class are expected to fail when coercion between primitive Trino types changes behavior
-
     private QueryAssertions assertions;
 
     @BeforeAll
@@ -72,8 +72,6 @@ public class TestJsonOperators
         assertions.close();
         assertions = null;
     }
-
-    // todo add cases for decimal
 
     @Test
     public void testCastToBigint()
@@ -101,7 +99,7 @@ public class TestJsonOperators
 
         assertTrinoExceptionThrownBy(() -> assertions.expression("cast(a as BIGINT)")
                 .binding("a", "JSON '12345678901234567890.0'").evaluate())
-                .hasErrorCode(INVALID_CAST_ARGUMENT);
+                .hasErrorCode(NUMERIC_VALUE_OUT_OF_RANGE);
 
         assertThat(assertions.expression("cast(a as BIGINT)")
                 .binding("a", "JSON '1e-324'"))
@@ -109,7 +107,7 @@ public class TestJsonOperators
 
         assertTrinoExceptionThrownBy(() -> assertions.expression("cast(a as BIGINT)")
                 .binding("a", "JSON '1e309'").evaluate())
-                .hasErrorCode(INVALID_CAST_ARGUMENT);
+                .hasErrorCode(NUMERIC_VALUE_OUT_OF_RANGE);
 
         assertThat(assertions.expression("cast(a as BIGINT)")
                 .binding("a", "JSON 'true'"))
@@ -151,6 +149,14 @@ public class TestJsonOperators
         assertTrinoExceptionThrownBy(() -> assertions.expression("cast(a as BIGINT)")
                 .binding("a", "JSON '{ \"x\" : 123}'").evaluate())
                 .hasErrorCode(INVALID_CAST_ARGUMENT);
+
+        // Extreme values
+        assertThat(assertions.expression("cast(a as BIGINT)")
+                .binding("a", "JSON '9223372036854775807'"))
+                .isEqualTo(9223372036854775807L);
+        assertThat(assertions.expression("cast(a as BIGINT)")
+                .binding("a", "JSON '-9223372036854775808'"))
+                .isEqualTo(-9223372036854775808L);
     }
 
     @Test
@@ -174,7 +180,7 @@ public class TestJsonOperators
 
         assertTrinoExceptionThrownBy(() -> assertions.expression("cast(a as INTEGER)")
                 .binding("a", "JSON '12345678901.0'").evaluate())
-                .hasErrorCode(INVALID_CAST_ARGUMENT);
+                .hasErrorCode(NUMERIC_VALUE_OUT_OF_RANGE);
 
         assertThat(assertions.expression("cast(a as INTEGER)")
                 .binding("a", "JSON '1e-324'"))
@@ -182,7 +188,7 @@ public class TestJsonOperators
 
         assertTrinoExceptionThrownBy(() -> assertions.expression("cast(a as INTEGER)")
                 .binding("a", "JSON '1e309'").evaluate())
-                .hasErrorCode(INVALID_CAST_ARGUMENT);
+                .hasErrorCode(NUMERIC_VALUE_OUT_OF_RANGE);
 
         assertThat(assertions.expression("cast(a as INTEGER)")
                 .binding("a", "JSON 'true'"))
@@ -247,7 +253,7 @@ public class TestJsonOperators
 
         assertTrinoExceptionThrownBy(() -> assertions.expression("cast(a as SMALLINT)")
                 .binding("a", "JSON '123456.0'").evaluate())
-                .hasErrorCode(INVALID_CAST_ARGUMENT);
+                .hasErrorCode(NUMERIC_VALUE_OUT_OF_RANGE);
 
         assertThat(assertions.expression("cast(a as SMALLINT)")
                 .binding("a", "JSON '1e-324'"))
@@ -255,7 +261,7 @@ public class TestJsonOperators
 
         assertTrinoExceptionThrownBy(() -> assertions.expression("cast(a as SMALLINT)")
                 .binding("a", "JSON '1e309'").evaluate())
-                .hasErrorCode(INVALID_CAST_ARGUMENT);
+                .hasErrorCode(NUMERIC_VALUE_OUT_OF_RANGE);
 
         assertThat(assertions.expression("cast(a as SMALLINT)")
                 .binding("a", "JSON 'true'"))
@@ -320,7 +326,7 @@ public class TestJsonOperators
 
         assertTrinoExceptionThrownBy(() -> assertions.expression("cast(a as TINYINT)")
                 .binding("a", "JSON '1234.0'").evaluate())
-                .hasErrorCode(INVALID_CAST_ARGUMENT);
+                .hasErrorCode(NUMERIC_VALUE_OUT_OF_RANGE);
 
         assertThat(assertions.expression("cast(a as TINYINT)")
                 .binding("a", "JSON '1e-324'"))
@@ -328,7 +334,7 @@ public class TestJsonOperators
 
         assertTrinoExceptionThrownBy(() -> assertions.expression("cast(a as TINYINT)")
                 .binding("a", "JSON '1e309'").evaluate())
-                .hasErrorCode(INVALID_CAST_ARGUMENT);
+                .hasErrorCode(NUMERIC_VALUE_OUT_OF_RANGE);
 
         assertThat(assertions.expression("cast(a as TINYINT)")
                 .binding("a", "JSON 'true'"))
@@ -457,6 +463,22 @@ public class TestJsonOperators
                 .binding("a", "TINYINT '127'"))
                 .hasType(JSON)
                 .isEqualTo("127");
+
+        assertThat(assertions.expression("cast(a as JSON)")
+                .binding("a", "128"))
+                .neverFails();
+
+        assertThat(assertions.expression("cast(a as JSON)")
+                .binding("a", "BIGINT '128'"))
+                .neverFails();
+
+        assertThat(assertions.expression("cast(a as JSON)")
+                .binding("a", "SMALLINT '128'"))
+                .neverFails();
+
+        assertThat(assertions.expression("cast(a as JSON)")
+                .binding("a", "TINYINT '127'"))
+                .neverFails();
     }
 
     @Test
@@ -569,6 +591,10 @@ public class TestJsonOperators
                 .binding("a", "-infinity()"))
                 .hasType(JSON)
                 .isEqualTo("\"-Infinity\"");
+
+        assertThat(assertions.expression("cast(a as JSON)")
+                .binding("a", "3.14E0"))
+                .neverFails();
     }
 
     @Test
@@ -597,6 +623,10 @@ public class TestJsonOperators
                 .binding("a", "cast(-infinity() as REAL)"))
                 .hasType(JSON)
                 .isEqualTo("\"-Infinity\"");
+
+        assertThat(assertions.expression("cast(a as JSON)")
+                .binding("a", "REAL '3.14'"))
+                .neverFails();
     }
 
     @Test
@@ -700,6 +730,11 @@ public class TestJsonOperators
                 .isEqualTo(decimal("128.000", createDecimalType(10, 3)));
 
         assertThat(assertions.expression("cast(a as DECIMAL(38,8))")
+                .binding("a", "JSON '123456789012345678901234567890.12345678'"))
+                .hasType(createDecimalType(38, 8))
+                .isEqualTo(decimal("123456789012345678901234567890.12345678", createDecimalType(38, 8)));
+
+        assertThat(assertions.expression("cast(a as DECIMAL(38,8))")
                 .binding("a", "cast(DECIMAL '123456789012345678901234567890.12345678' as JSON)"))
                 .hasType(createDecimalType(38, 8))
                 .isEqualTo(decimal("123456789012345678901234567890.12345678", createDecimalType(38, 8)));
@@ -723,7 +758,7 @@ public class TestJsonOperators
                 .binding("a", "JSON '1234567890123456'")
                 .evaluate())
                 .hasMessage("Cannot cast input json to DECIMAL(10,3)")
-                .hasErrorCode(INVALID_CAST_ARGUMENT);
+                .hasErrorCode(NUMERIC_VALUE_OUT_OF_RANGE);
 
         assertTrinoExceptionThrownBy(() -> assertions.expression("cast(a as DECIMAL(10,3))")
                 .binding("a", "JSON '{ \"x\" : 123}'")
@@ -784,10 +819,10 @@ public class TestJsonOperators
                 .binding("a", "JSON '1e-324'"))
                 .isEqualTo(false);
 
-        // overflow
-        assertTrinoExceptionThrownBy(() -> assertions.expression("cast(a as BOOLEAN)")
-                .binding("a", "JSON '1e309'").evaluate())
-                .hasErrorCode(INVALID_CAST_ARGUMENT);
+        // overflow if parsed as double
+        assertThat(assertions.expression("cast(a as BOOLEAN)")
+                .binding("a", "JSON '1e309'"))
+                .isEqualTo(true);
 
         assertThat(assertions.expression("cast(a as BOOLEAN)")
                 .binding("a", "JSON 'true'"))
@@ -847,6 +882,10 @@ public class TestJsonOperators
                 .binding("a", "FALSE"))
                 .hasType(JSON)
                 .isEqualTo("false");
+
+        assertThat(assertions.expression("cast(a as JSON)")
+                .binding("a", "TRUE"))
+                .neverFails();
     }
 
     @Test
@@ -861,7 +900,42 @@ public class TestJsonOperators
                 .hasType(VARCHAR)
                 .isEqualTo("128");
 
-        // overflow, no loss of precision
+        assertThat(assertions.expression("cast(a as VARCHAR)")
+                .binding("a", "JSON '0'"))
+                .hasType(VARCHAR)
+                .isEqualTo("0");
+
+        assertThat(assertions.expression("cast(a as VARCHAR)")
+                .binding("a", "JSON '0.000000000000000'"))
+                .hasType(VARCHAR)
+                .isEqualTo("0E0");
+
+        assertThat(assertions.expression("cast(a as VARCHAR)")
+                .binding("a", "JSON '0e1000'"))
+                .hasType(VARCHAR)
+                .isEqualTo("0E0");
+
+        assertThat(assertions.expression("cast(a as VARCHAR)")
+                .binding("a", "JSON '0e-1000'"))
+                .hasType(VARCHAR)
+                .isEqualTo("0E0");
+
+        assertThat(assertions.expression("cast(a as VARCHAR)")
+                .binding("a", "JSON '1'"))
+                .hasType(VARCHAR)
+                .isEqualTo("1");
+
+        assertThat(assertions.expression("cast(a as VARCHAR)")
+                .binding("a", "JSON '100000000000000000000000000000000000000000000000000000000000000000000e-68'"))
+                .hasType(VARCHAR)
+                .isEqualTo("1.0E0");
+
+        assertThat(assertions.expression("cast(a as VARCHAR)")
+                .binding("a", "JSON '0.100000000000000'"))
+                .hasType(VARCHAR)
+                .isEqualTo("1.0E-1");
+
+        // overflow if parsed as long, no loss of precision
         assertThat(assertions.expression("cast(a as VARCHAR)")
                 .binding("a", "JSON '12345678901234567890'"))
                 .hasType(VARCHAR)
@@ -1061,6 +1135,10 @@ public class TestJsonOperators
                 .binding("a", "'\"a\":2'"))
                 .hasType(JSON)
                 .isEqualTo("\"\\\"a\\\":2\"");
+
+        assertThat(assertions.expression("cast(a as JSON)")
+                .binding("a", "'abc'"))
+                .neverFails();
     }
 
     @Test
@@ -1074,6 +1152,10 @@ public class TestJsonOperators
                 .binding("a", "TIMESTAMP '1970-01-01 00:00:01'"))
                 .hasType(JSON)
                 .isEqualTo(format("\"%s\"", sqlTimestampOf(0, 1970, 1, 1, 0, 0, 1, 0)));
+
+        assertThat(assertions.expression("cast(a as JSON)")
+                .binding("a", "TIMESTAMP '1970-01-01 00:00:01'"))
+                .neverFails();
     }
 
     @Test
@@ -1188,5 +1270,156 @@ public class TestJsonOperators
 
         assertThat(assertions.operator(INDETERMINATE, "JSON '\"-Infinity\"'"))
                 .isEqualTo(false);
+    }
+
+    @Test
+    public void testCastToNumber()
+    {
+        assertThat(assertions.expression("cast(a as NUMBER)")
+                .binding("a", "JSON 'null'"))
+                .isNull(NUMBER);
+
+        assertThat(assertions.expression("cast(a as NUMBER)")
+                .binding("a", "JSON '128'"))
+                .matches("NUMBER '128'");
+
+        assertThat(assertions.expression("cast(a as NUMBER)")
+                .binding("a", "JSON '12345678901234567890'"))
+                .matches("NUMBER '12345678901234567890'");
+
+        assertThat(assertions.expression("cast(a as NUMBER)")
+                .binding("a", "JSON '12345678901234567890123456789012345678'"))
+                .matches("NUMBER '12345678901234567890123456789012345678'");
+
+        assertThat(assertions.expression("cast(a as NUMBER)")
+                .binding("a", "JSON '123456789012345678901234567890.123456789012345678901234567890'"))
+                .matches("NUMBER '123456789012345678901234567890.123456789012345678901234567890'");
+
+        assertThat(assertions.expression("cast(a as NUMBER)")
+                .binding("a", "JSON '128.9'"))
+                .matches("NUMBER '128.9'");
+
+        assertThat(assertions.expression("cast(a as NUMBER)")
+                .binding("a", "JSON '1e-324'"))
+                .matches("NUMBER '1E-324'");
+
+        assertThat(assertions.expression("cast(a as NUMBER)")
+                .binding("a", "JSON '1e308'"))
+                .matches("NUMBER '1e308'");
+
+        assertThat(assertions.expression("cast(a as NUMBER)")
+                .binding("a", "JSON 'true'"))
+                .matches("NUMBER '1'");
+
+        assertThat(assertions.expression("cast(a as NUMBER)")
+                .binding("a", "JSON 'false'"))
+                .matches("NUMBER '0'");
+
+        assertThat(assertions.expression("cast(a as NUMBER)")
+                .binding("a", "JSON '\"128\"'"))
+                .matches("NUMBER '128'");
+
+        assertThat(assertions.expression("cast(a as NUMBER)")
+                .binding("a", "JSON '\"128.456\"'"))
+                .matches("NUMBER '128.456'");
+
+        assertThat(assertions.expression("cast(a as NUMBER)")
+                .binding("a", "JSON '\"NaN\"'"))
+                .matches("NUMBER 'NaN'");
+
+        assertThat(assertions.expression("cast(a as NUMBER)")
+                .binding("a", "JSON '\"Infinity\"'"))
+                .matches("NUMBER '+Infinity'");
+
+        assertThat(assertions.expression("cast(a as NUMBER)")
+                .binding("a", "JSON '\"+Infinity\"'"))
+                .matches("NUMBER '+Infinity'");
+
+        assertThat(assertions.expression("cast(a as NUMBER)")
+                .binding("a", "JSON '\"-Infinity\"'"))
+                .matches("NUMBER '-Infinity'");
+
+        assertTrinoExceptionThrownBy(() -> assertions.expression("cast(a as NUMBER)")
+                .binding("a", "JSON '\"abc\"'").evaluate())
+                .hasErrorCode(INVALID_CAST_ARGUMENT);
+
+        assertTrinoExceptionThrownBy(() -> assertions.expression("cast(a as NUMBER)")
+                .binding("a", "JSON '{ \"x\" : 123}'").evaluate())
+                .hasErrorCode(INVALID_CAST_ARGUMENT);
+
+        // with spaces
+        assertThat(assertions.expression("cast(a as NUMBER)")
+                .binding("a", "JSON '   \"   -128.456   \"   '"))
+                .matches("NUMBER '-128.456'");
+
+        assertThat(assertions.expression("cast(a as NUMBER)")
+                .binding("a", "JSON '   \"   NaN   \"   '"))
+                .matches("NUMBER 'NaN'");
+
+        assertThat(assertions.expression("cast(a as NUMBER)")
+                .binding("a", "JSON '   \"   Infinity   \"   '"))
+                .matches("NUMBER '+Infinity'");
+
+        assertThat(assertions.expression("cast(a as NUMBER)")
+                .binding("a", "JSON '   \"   +Infinity   \"   '"))
+                .matches("NUMBER '+Infinity'");
+
+        assertThat(assertions.expression("cast(a as NUMBER)")
+                .binding("a", "JSON '   \"   -Infinity   \"   '"))
+                .matches("NUMBER '-Infinity'");
+    }
+
+    @Test
+    public void testCastFromNumber()
+    {
+        assertThat(assertions.expression("cast(a as JSON)")
+                .binding("a", "cast(null as NUMBER)"))
+                .isNull(JSON);
+
+        assertThat(assertions.expression("cast(a as JSON)")
+                .binding("a", "NUMBER '3.14'"))
+                .hasType(JSON)
+                .isEqualTo("3.14");
+
+        assertThat(assertions.expression("cast(a as JSON)")
+                .binding("a", "NUMBER '12345678901234567890.123456789012345678'"))
+                .hasType(JSON)
+                .isEqualTo("12345678901234567890.123456789012345678");
+
+        assertThat(assertions.expression("cast(a as JSON)")
+                .binding("a", "NUMBER 'NaN'"))
+                .hasType(JSON)
+                .isEqualTo("\"NaN\"");
+
+        assertThat(assertions.expression("cast(a as JSON)")
+                .binding("a", "NUMBER '+Infinity'"))
+                .hasType(JSON)
+                .isEqualTo("\"+Infinity\"");
+
+        assertThat(assertions.expression("cast(a as JSON)")
+                .binding("a", "NUMBER '-Infinity'"))
+                .hasType(JSON)
+                .isEqualTo("\"-Infinity\"");
+
+        assertThat(assertions.expression("cast(a as JSON)")
+                .binding("a", "NUMBER '3.14'"))
+                .neverFails();
+    }
+
+    @Test
+    public void testCastFromDate()
+    {
+        assertThat(assertions.expression("cast(a as JSON)")
+                .binding("a", "cast(null as date)"))
+                .isNull(JSON);
+
+        assertThat(assertions.expression("cast(a as JSON)")
+                .binding("a", "DATE '2024-01-01'"))
+                .hasType(JSON)
+                .isEqualTo("\"2024-01-01\"");
+
+        assertThat(assertions.expression("cast(a as JSON)")
+                .binding("a", "DATE '2024-01-01'"))
+                .neverFails();
     }
 }

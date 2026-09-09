@@ -17,7 +17,6 @@ import io.trino.spi.block.Block;
 import io.trino.spi.type.DecimalType;
 import io.trino.spi.type.Type;
 import org.apache.parquet.column.statistics.Statistics;
-import org.apache.parquet.column.values.ValuesWriter;
 import org.apache.parquet.io.api.Binary;
 import org.apache.parquet.schema.PrimitiveType;
 
@@ -62,40 +61,38 @@ public class FixedLenByteArrayShortDecimalValueWriter
     private static void storeLongIntoBuffer(long unscaledValue, byte[] buffer)
     {
         switch (buffer.length) {
-            case 1:
-                buffer[0] = (byte) unscaledValue;
-                break;
-            case 2:
+            case 1 -> buffer[0] = (byte) unscaledValue;
+            case 2 -> {
                 buffer[0] = (byte) (unscaledValue >> 8);
                 buffer[1] = (byte) unscaledValue;
-                break;
-            case 3:
+            }
+            case 3 -> {
                 buffer[0] = (byte) (unscaledValue >> 16);
                 buffer[1] = (byte) (unscaledValue >> 8);
                 buffer[2] = (byte) unscaledValue;
-                break;
-            case 4:
+            }
+            case 4 -> {
                 buffer[0] = (byte) (unscaledValue >> 24);
                 buffer[1] = (byte) (unscaledValue >> 16);
                 buffer[2] = (byte) (unscaledValue >> 8);
                 buffer[3] = (byte) unscaledValue;
-                break;
-            case 5:
+            }
+            case 5 -> {
                 buffer[0] = (byte) (unscaledValue >> 32);
                 buffer[1] = (byte) (unscaledValue >> 24);
                 buffer[2] = (byte) (unscaledValue >> 16);
                 buffer[3] = (byte) (unscaledValue >> 8);
                 buffer[4] = (byte) unscaledValue;
-                break;
-            case 6:
+            }
+            case 6 -> {
                 buffer[0] = (byte) (unscaledValue >> 40);
                 buffer[1] = (byte) (unscaledValue >> 32);
                 buffer[2] = (byte) (unscaledValue >> 24);
                 buffer[3] = (byte) (unscaledValue >> 16);
                 buffer[4] = (byte) (unscaledValue >> 8);
                 buffer[5] = (byte) unscaledValue;
-                break;
-            case 7:
+            }
+            case 7 -> {
                 buffer[0] = (byte) (unscaledValue >> 48);
                 buffer[1] = (byte) (unscaledValue >> 40);
                 buffer[2] = (byte) (unscaledValue >> 32);
@@ -103,8 +100,8 @@ public class FixedLenByteArrayShortDecimalValueWriter
                 buffer[4] = (byte) (unscaledValue >> 16);
                 buffer[5] = (byte) (unscaledValue >> 8);
                 buffer[6] = (byte) unscaledValue;
-                break;
-            case 8:
+            }
+            case 8 -> {
                 buffer[0] = (byte) (unscaledValue >> 56);
                 buffer[1] = (byte) (unscaledValue >> 48);
                 buffer[2] = (byte) (unscaledValue >> 40);
@@ -113,9 +110,8 @@ public class FixedLenByteArrayShortDecimalValueWriter
                 buffer[5] = (byte) (unscaledValue >> 16);
                 buffer[6] = (byte) (unscaledValue >> 8);
                 buffer[7] = (byte) unscaledValue;
-                break;
-            default:
-                throw new IllegalArgumentException("Invalid number of bytes: " + buffer.length);
+            }
+            default -> throw new IllegalArgumentException("Invalid number of bytes: " + buffer.length);
         }
     }
 }

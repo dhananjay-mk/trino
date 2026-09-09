@@ -13,16 +13,17 @@
  */
 package io.trino.plugin.iceberg;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.json.JsonMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.common.collect.ImmutableMap;
 import io.trino.Session;
+import io.trino.filesystem.Location;
 import io.trino.filesystem.TrinoFileSystemFactory;
 import io.trino.metastore.HiveMetastore;
+import io.trino.parquet.metadata.ParquetMetadata;
+import io.trino.plugin.geospatial.GeoPlugin;
 import io.trino.plugin.hive.HivePlugin;
 import io.trino.plugin.iceberg.catalog.TrinoCatalog;
+import io.trino.plugin.iceberg.encryption.DefaultEncryptionManagerFactory;
+import io.trino.plugin.iceberg.encryption.EncryptionManagerFactory;
 import io.trino.plugin.tpch.TpchPlugin;
 import io.trino.spi.connector.SchemaTableName;
 import io.trino.testing.AbstractTestQueryFramework;
@@ -30,13 +31,14 @@ import io.trino.testing.DistributedQueryRunner;
 import io.trino.testing.MaterializedResult;
 import io.trino.testing.QueryRunner;
 import io.trino.testing.sql.TestTable;
-import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.BaseTable;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.FileFormat;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
+import org.apache.iceberg.SchemaParser;
 import org.apache.iceberg.Snapshot;
+import org.apache.iceberg.SnapshotChanges;
 import org.apache.iceberg.SortOrder;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.TableMetadata;
@@ -51,41 +53,48 @@ import org.apache.iceberg.hadoop.HadoopTables;
 import org.apache.iceberg.io.DataWriter;
 import org.apache.iceberg.io.OutputFileFactory;
 import org.apache.iceberg.parquet.Parquet;
+import org.apache.iceberg.types.EdgeAlgorithm;
 import org.apache.iceberg.types.Types;
+import org.apache.iceberg.types.Types.GeometryType;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 
 import static com.google.common.collect.Iterables.getOnlyElement;
-import static com.google.common.io.MoreFiles.deleteRecursively;
-import static com.google.common.io.RecursiveDeleteOption.ALLOW_INSECURE;
+import static com.google.inject.multibindings.OptionalBinder.newOptionalBinder;
 import static io.trino.plugin.iceberg.IcebergQueryRunner.ICEBERG_CATALOG;
 import static io.trino.plugin.iceberg.IcebergTestUtils.SESSION;
 import static io.trino.plugin.iceberg.IcebergTestUtils.getFileSystemFactory;
 import static io.trino.plugin.iceberg.IcebergTestUtils.getHiveMetastore;
+import static io.trino.plugin.iceberg.IcebergTestUtils.getParquetFileMetadata;
 import static io.trino.plugin.iceberg.IcebergTestUtils.getTrinoCatalog;
-import static io.trino.plugin.iceberg.IcebergUtil.getLatestMetadataLocation;
 import static io.trino.plugin.iceberg.util.EqualityDeleteUtils.writeEqualityDeleteForTable;
 import static io.trino.spi.StandardErrorCode.NOT_SUPPORTED;
 import static io.trino.testing.TestingNames.randomNameSuffix;
 import static io.trino.testing.TestingSession.testSessionBuilder;
+import static org.apache.iceberg.TableProperties.FORMAT_VERSION;
+import static org.apache.parquet.schema.LogicalTypeAnnotation.geometryType;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.keycloak.util.JsonSerialization.mapper;
 
 public class TestIcebergV3
         extends AbstractTestQueryFramework
 {
     private static final List<String> ALL_FILE_FORMATS = List.of("PARQUET", "ORC", "AVRO");
+    private static final HadoopTables HADOOP_TABLES = new HadoopTables();
 
     private HiveMetastore metastore;
     private TrinoFileSystemFactory fileSystemFactory;
     private TrinoCatalog catalog;
+    private Path dataDirectory;
 
     @Override
     protected QueryRunner createQueryRunner()
@@ -101,10 +110,16 @@ public class TestIcebergV3
         queryRunner.installPlugin(new TpchPlugin());
         queryRunner.createCatalog("tpch", "tpch");
 
-        Path dataDirectory = queryRunner.getCoordinator().getBaseDataDir().resolve("iceberg_data");
+        queryRunner.installPlugin(new GeoPlugin());
+        dataDirectory = queryRunner.getCoordinator().getBaseDataDir().resolve("iceberg_data");
         dataDirectory.toFile().mkdirs();
 
-        queryRunner.installPlugin(new TestingIcebergPlugin(dataDirectory));
+        queryRunner.installPlugin(new TestingIcebergPlugin(
+                dataDirectory,
+                Optional::empty,
+                () -> Optional.of(binder -> newOptionalBinder(binder, EncryptionManagerFactory.class)
+                        .setBinding()
+                        .toInstance(new DefaultEncryptionManagerFactory(Optional.of(new TestingFileMetastoreKeyManagementClient()))))));
         queryRunner.createCatalog(ICEBERG_CATALOG, "iceberg", ImmutableMap.of(
                 "iceberg.catalog.type", "TESTING_FILE_METASTORE",
                 "iceberg.format-version", "3",
@@ -455,11 +470,181 @@ public class TestIcebergV3
     }
 
     @Test
+    void testTimestampNano()
+            throws IOException
+    {
+        String tableName = "test_timestamp_nano_" + randomNameSuffix();
+
+        // Create table with timestamp_nano column using Iceberg API
+        Schema schema = new Schema(
+                Types.NestedField.required(1, "id", Types.IntegerType.get()),
+                Types.NestedField.optional(2, "ts_nano", Types.TimestampNanoType.withoutZone()));
+
+        Table table = createV3Table(tableName, schema);
+
+        // Write data with nanosecond precision
+        String dataPath = table.location() + "/data/data-" + UUID.randomUUID() + ".parquet";
+        try (DataWriter<Record> writer = Parquet.writeData(table.io().newOutputFile(dataPath))
+                .forTable(table)
+                .withSpec(table.spec())
+                .withPartition(null)
+                .createWriterFunc(GenericParquetWriter::create)
+                .build()) {
+            Record record = GenericRecord.create(schema);
+            record.setField("id", 1);
+            // 2024-01-15 12:30:45.123456789
+            record.setField("ts_nano", LocalDateTime.of(2024, 1, 15, 12, 30, 45, 123456789));
+            writer.write(record);
+            writer.close();
+
+            table.newFastAppend()
+                    .appendFile(writer.toDataFile())
+                    .commit();
+        }
+
+        assertThat(query("SELECT id, ts_nano FROM " + tableName))
+                .matches("VALUES (1, TIMESTAMP '2024-01-15 12:30:45.123456789')");
+
+        assertUpdate("DROP TABLE " + tableName);
+    }
+
+    @Test
+    void testTrinoTimestampNano()
+    {
+        for (String format : List.of("PARQUET", "ORC", "AVRO")) {
+            String tableName = "test_trino_timestamp_nano_" + randomNameSuffix();
+            try {
+                assertUpdate("CREATE TABLE " + tableName + " (id INTEGER, ts_nano TIMESTAMP(9)) WITH (format = '" + format + "')");
+
+                // Insert with full nanosecond precision
+                assertUpdate("INSERT INTO " + tableName + " VALUES (1, TIMESTAMP '2024-01-15 12:30:45.123456789')", 1);
+                assertUpdate("INSERT INTO " + tableName + " VALUES (2, TIMESTAMP '2024-06-30 23:59:59.999999999')", 1);
+                assertUpdate("INSERT INTO " + tableName + " VALUES (3, NULL)", 1);
+
+                // Verify data is read back correctly with nanosecond precision preserved
+                assertThat(query("SELECT id, ts_nano FROM " + tableName + " ORDER BY id"))
+                        .matches("VALUES " +
+                                "(INTEGER '1', TIMESTAMP '2024-01-15 12:30:45.123456789'), " +
+                                "(INTEGER '2', TIMESTAMP '2024-06-30 23:59:59.999999999'), " +
+                                "(INTEGER '3', NULL)");
+
+                // Test that nanosecond precision differences are preserved
+                assertUpdate("INSERT INTO " + tableName + " VALUES (4, TIMESTAMP '2024-01-15 12:30:45.123456780')", 1);
+
+                // Verify all rows including the one with different nanosecond precision
+                assertThat(query("SELECT id, ts_nano FROM " + tableName + " ORDER BY id"))
+                        .matches("VALUES " +
+                                "(INTEGER '1', TIMESTAMP '2024-01-15 12:30:45.123456789'), " +
+                                "(INTEGER '2', TIMESTAMP '2024-06-30 23:59:59.999999999'), " +
+                                "(INTEGER '3', NULL), " +
+                                "(INTEGER '4', TIMESTAMP '2024-01-15 12:30:45.123456780')");
+            }
+            finally {
+                assertUpdate("DROP TABLE IF EXISTS " + tableName);
+            }
+        }
+    }
+
+    @Test
+    void testTimestampNanoPartition()
+    {
+        try (TestTable table = newTrinoTable("test_nano_partition", "(id INTEGER, x TIMESTAMP(9)) WITH (partitioning = ARRAY['x'])")) {
+            assertUpdate("INSERT INTO " + table.getName() + " VALUES (1, TIMESTAMP '2022-07-26 12:13:14.123456789')", 1);
+
+            assertThat(query("SELECT x FROM " + table.getName()))
+                    .matches("VALUES TIMESTAMP '2022-07-26 12:13:14.123456789'");
+            assertThat(query("SELECT 1 FROM " + table.getName() + " WHERE x = TIMESTAMP '2022-07-26 12:13:14.123456789'"))
+                    .matches("VALUES 1");
+        }
+    }
+
+    @Test
+    void testTimestampNanoWithTimeZone()
+            throws IOException
+    {
+        String tableName = "test_timestamp_nano_tz_" + randomNameSuffix();
+
+        // Create table with timestamp_nano (with UTC adjustment) column using Iceberg API
+        Schema schema = new Schema(
+                Types.NestedField.required(1, "id", Types.IntegerType.get()),
+                Types.NestedField.optional(2, "ts_nano_tz", Types.TimestampNanoType.withZone()));
+
+        Table table = createV3Table(tableName, schema);
+
+        // Write data with nanosecond precision
+        String dataPath = table.location() + "/data/data-" + UUID.randomUUID() + ".parquet";
+        try (DataWriter<Record> writer = Parquet.writeData(table.io().newOutputFile(dataPath))
+                .forTable(table)
+                .withSpec(table.spec())
+                .withPartition(null)
+                .createWriterFunc(GenericParquetWriter::create)
+                .build()) {
+            Record record = GenericRecord.create(schema);
+            record.setField("id", 1);
+            // 2024-01-15 12:30:45.123456789 UTC
+            record.setField("ts_nano_tz", OffsetDateTime.of(2024, 1, 15, 12, 30, 45, 123456789, ZoneOffset.UTC));
+            writer.write(record);
+            writer.close();
+
+            table.newFastAppend()
+                    .appendFile(writer.toDataFile())
+                    .commit();
+        }
+
+        assertThat(query("SELECT id, ts_nano_tz FROM " + tableName))
+                .matches("VALUES (1, TIMESTAMP '2024-01-15 12:30:45.123456789 UTC')");
+
+        assertUpdate("DROP TABLE " + tableName);
+    }
+
+    @Test
+    void testTrinoTimestampNanoWithTimeZone()
+    {
+        for (String format : List.of("PARQUET", "ORC", "AVRO")) {
+            String tableName = "test_trino_timestamp_nano_tz_" + randomNameSuffix();
+            try {
+                assertUpdate("CREATE TABLE " + tableName + " (id INTEGER, ts_nano_tz TIMESTAMP(9) WITH TIME ZONE) WITH (format = '" + format + "')");
+
+                // Insert with full nanosecond precision
+                assertUpdate("INSERT INTO " + tableName + " VALUES (1, TIMESTAMP '2024-01-15 12:30:45.123456789 UTC')", 1);
+                assertUpdate("INSERT INTO " + tableName + " VALUES (2, TIMESTAMP '2024-06-30 23:59:59.999999999 UTC')", 1);
+                assertUpdate("INSERT INTO " + tableName + " VALUES (3, NULL)", 1);
+                // Insert with non-UTC timezone - should be normalized to UTC when read back
+                assertUpdate("INSERT INTO " + tableName + " VALUES (4, TIMESTAMP '2024-01-15 18:00:45.123456789 +05:30')", 1);
+
+                // Verify data is read back correctly with nanosecond precision preserved
+                // Note: row 4 was inserted as +05:30 but reads back as UTC
+                assertThat(query("SELECT id, ts_nano_tz FROM " + tableName + " ORDER BY id"))
+                        .matches("VALUES " +
+                                "(INTEGER '1', TIMESTAMP '2024-01-15 12:30:45.123456789 UTC'), " +
+                                "(INTEGER '2', TIMESTAMP '2024-06-30 23:59:59.999999999 UTC'), " +
+                                "(INTEGER '3', NULL), " +
+                                "(INTEGER '4', TIMESTAMP '2024-01-15 12:30:45.123456789 UTC')");
+
+                // Test that nanosecond precision differences are preserved
+                assertUpdate("INSERT INTO " + tableName + " VALUES (5, TIMESTAMP '2024-01-15 12:30:45.123456780 UTC')", 1);
+
+                // Verify all rows including the one with different nanosecond precision
+                assertThat(query("SELECT id, ts_nano_tz FROM " + tableName + " ORDER BY id"))
+                        .matches("VALUES " +
+                                "(INTEGER '1', TIMESTAMP '2024-01-15 12:30:45.123456789 UTC'), " +
+                                "(INTEGER '2', TIMESTAMP '2024-06-30 23:59:59.999999999 UTC'), " +
+                                "(INTEGER '3', NULL), " +
+                                "(INTEGER '4', TIMESTAMP '2024-01-15 12:30:45.123456789 UTC'), " +
+                                "(INTEGER '5', TIMESTAMP '2024-01-15 12:30:45.123456780 UTC')");
+            }
+            finally {
+                assertUpdate("DROP TABLE IF EXISTS " + tableName);
+            }
+        }
+    }
+
+    @Test
     void testV3RejectsAddFilesProcedure()
     {
         String tableName = "add_files_target_" + randomNameSuffix();
 
-        assertUpdate("CREATE TABLE " + tableName + " (x integer) WITH (format = 'ORC', format_version = 3)");
+        assertUpdate("CREATE TABLE " + tableName + " (x integer) WITH (format = 'ORC')");
 
         assertThat(query("ALTER TABLE " + tableName + " EXECUTE add_files(location => 'file:///tmp', format => 'ORC')"))
                 .failure()
@@ -474,7 +659,7 @@ public class TestIcebergV3
     {
         String tableName = "add_files_from_table_target_" + randomNameSuffix();
 
-        assertUpdate("CREATE TABLE " + tableName + " (x integer) WITH (format = 'ORC', format_version = 3)");
+        assertUpdate("CREATE TABLE " + tableName + " (x integer) WITH (format = 'ORC')");
 
         assertThat(query("ALTER TABLE " + tableName + " EXECUTE add_files_from_table(schema_name => 'tpch', table_name => 'non_existent')"))
                 .failure()
@@ -489,7 +674,7 @@ public class TestIcebergV3
     {
         // Create a data file with only 'id' column
         String tableName = "v3_defaults_" + randomNameSuffix();
-        assertUpdate("CREATE TABLE " + tableName + " (id INTEGER) WITH (format_version = 3, format = 'ORC')");
+        assertUpdate("CREATE TABLE " + tableName + " (id INTEGER) WITH (format = 'ORC')");
         assertUpdate("INSERT INTO " + tableName + " VALUES 1", 1);
 
         // Add a value column (missing from file, has initial-default)
@@ -514,7 +699,6 @@ public class TestIcebergV3
         // Create a v3 table with a column that has write-default (but not initial-default)
         // Note: write-default is used for INSERT, initial-default is used for reading missing columns
         String tableName = "v3_write_defaults_" + randomNameSuffix();
-        SchemaTableName schemaTableName = new SchemaTableName("tpch", tableName);
         Schema schemaWithWriteDefault = new Schema(
                 Types.NestedField.optional("id")
                         .withId(1)
@@ -525,20 +709,11 @@ public class TestIcebergV3
                         .ofType(Types.IntegerType.get())
                         .withWriteDefault(Expressions.lit(99))
                         .build());
-
-        catalog.newCreateTableTransaction(
-                        SESSION,
-                        schemaTableName,
-                        schemaWithWriteDefault,
-                        PartitionSpec.unpartitioned(),
-                        SortOrder.unsorted(),
-                        Optional.ofNullable(catalog.defaultTableLocation(SESSION, schemaTableName)),
-                        ImmutableMap.of("format-version", "3"))
-                .commitTransaction();
+        createV3Table(tableName, schemaWithWriteDefault);
 
         BaseTable tempTable = loadTable(temp);
         loadTable(tableName).newFastAppend()
-                .appendFile(getOnlyElement(tempTable.currentSnapshot().addedDataFiles(tempTable.io())))
+                .appendFile(getOnlyElement(SnapshotChanges.builderFor(tempTable).build().addedDataFiles()))
                 .commit();
 
         // The 'value' column is missing from the data file and has no initial-default, so it should return NULL
@@ -553,7 +728,6 @@ public class TestIcebergV3
     void testWriteDefaultOnInsert()
     {
         String tableName = "test_write_default_insert_" + randomNameSuffix();
-        SchemaTableName schemaTableName = new SchemaTableName("tpch", tableName);
 
         // Create a v3 table with write-default on column 'b'
         Schema schemaWithWriteDefault = new Schema(
@@ -566,16 +740,7 @@ public class TestIcebergV3
                         .ofType(Types.IntegerType.get())
                         .withWriteDefault(Expressions.lit(42))
                         .build());
-
-        catalog.newCreateTableTransaction(
-                        SESSION,
-                        schemaTableName,
-                        schemaWithWriteDefault,
-                        PartitionSpec.unpartitioned(),
-                        SortOrder.unsorted(),
-                        Optional.ofNullable(catalog.defaultTableLocation(SESSION, schemaTableName)),
-                        ImmutableMap.of("format-version", "3"))
-                .commitTransaction();
+        createV3Table(tableName, schemaWithWriteDefault);
 
         // Verify SHOW CREATE TABLE shows DEFAULT
         assertThat((String) computeScalar("SHOW CREATE TABLE " + tableName))
@@ -833,7 +998,7 @@ public class TestIcebergV3
         long totalRecords = 0;
         Long expectedLastUpdatedSequenceNumber = null;
 
-        for (DataFile file : snapshot.addedDataFiles(table.io())) {
+        for (DataFile file : SnapshotChanges.builderFor(table).build().addedDataFiles()) {
             fileCount++;
             totalRecords += file.recordCount();
 
@@ -1084,7 +1249,7 @@ public class TestIcebergV3
     }
 
     @Test
-    void testV3RejectsEncryptionKeyProperty()
+    void testV3AllowsEncryptionKeyPropertyForReads()
     {
         String tableName = "test_v3_encryption_" + randomNameSuffix();
         assertUpdate("CREATE TABLE " + tableName + " (id INTEGER) WITH (format = 'ORC', format_version = 3)");
@@ -1096,63 +1261,10 @@ public class TestIcebergV3
                 .set("encryption.key-id", "test_key")
                 .commit();
 
-        assertQueryFails(
-                "SELECT * FROM " + tableName,
-                ".*Iceberg table encryption is not supported.*");
+        assertThat(query("SELECT * FROM " + tableName))
+                .matches("VALUES 1");
 
-        // Also verify INSERT fails with encryption key set
-        assertQueryFails(
-                "INSERT INTO " + tableName + " VALUES 2",
-                ".*Iceberg table encryption is not supported.*");
-
-        // Clean up by removing the property first
-        icebergTable.updateProperties()
-                .remove("encryption.key-id")
-                .commit();
         assertUpdate("DROP TABLE " + tableName);
-    }
-
-    @Test
-    void testV3RejectsEncryptionKeysInMetadata()
-            throws Exception
-    {
-        String temp = "tmp_v3_encryption_src_" + randomNameSuffix();
-        assertUpdate("CREATE TABLE " + temp + " (id INTEGER) WITH (format = 'ORC')");
-        assertUpdate("INSERT INTO " + temp + " VALUES 1", 1);
-        Table tempTable = loadTable(temp);
-
-        String hadoopTableName = "hadoop_v3_encryption_" + randomNameSuffix();
-        Path hadoopTableLocation = Path.of(tempTable.location()).resolveSibling(hadoopTableName);
-
-        // Use HadoopTables to prevent stale caches from direct metadata.json modification
-        Table icebergTable = new HadoopTables(new Configuration(false)).create(
-                new Schema(Types.NestedField.optional(1, "id", Types.IntegerType.get())),
-                PartitionSpec.unpartitioned(),
-                SortOrder.unsorted(),
-                ImmutableMap.of(
-                        "format-version", "3",
-                        "write.format.default", "ORC"),
-                hadoopTableLocation.toString());
-
-        icebergTable.newFastAppend()
-                .appendFile(getOnlyElement(tempTable.currentSnapshot().addedDataFiles(tempTable.io())))
-                .commit();
-
-        // Inject encryption-keys + snapshot key-id into the current metadata.json.
-        injectEncryptionKeysIntoMetadataJson(hadoopTableLocation, "k1");
-
-        String registered = "registered_v3_encryption_" + randomNameSuffix();
-        assertUpdate("CALL system.register_table(CURRENT_SCHEMA, '%s', '%s')"
-                .formatted(registered, hadoopTableLocation));
-
-        assertQueryFails(
-                "SELECT * FROM " + registered,
-                ".*Iceberg table encryption is not supported.*");
-
-        // Use unregister_table instead of DROP TABLE because DROP TABLE triggers the same validation error
-        assertUpdate("CALL system.unregister_table(CURRENT_SCHEMA, '%s')".formatted(registered));
-        assertUpdate("DROP TABLE " + temp);
-        deleteRecursively(hadoopTableLocation, ALLOW_INSECURE);
     }
 
     @Test
@@ -1202,6 +1314,30 @@ public class TestIcebergV3
         assertThat(query("SELECT * FROM " + tableName))
                 .matches("VALUES (1), (2), (4)");
 
+        // Verify new columns for data files: delete-specific columns are NULL
+        assertThat(query(
+                "SELECT referenced_data_file, content_offset, content_size_in_bytes, " +
+                        "file_sequence_number IS NOT NULL, data_sequence_number IS NOT NULL, " +
+                        "manifest_location IS NOT NULL, pos IS NOT NULL " +
+                        "FROM \"" + tableName + "$files\" WHERE content = 0"))
+                .matches("VALUES (CAST(NULL AS VARCHAR), CAST(NULL AS BIGINT), CAST(NULL AS BIGINT), true, true, true, true)");
+
+        // Verify new columns for deletion vector: referenced_data_file matches the data file, content_offset and content_size_in_bytes are set
+        assertThat(query(
+                "SELECT referenced_data_file IS NOT NULL, content_offset IS NOT NULL, " +
+                        "content_size_in_bytes IS NOT NULL AND content_size_in_bytes > 0, " +
+                        "file_sequence_number IS NOT NULL, data_sequence_number IS NOT NULL, " +
+                        "manifest_location IS NOT NULL, pos IS NOT NULL " +
+                        "FROM \"" + tableName + "$files\" WHERE content = 1"))
+                .matches("VALUES (true, true, true, true, true, true, true)");
+
+        // Verify referenced_data_file for the DV matches the data file path
+        assertThat(query(
+                "SELECT dv.referenced_data_file = df.file_path " +
+                        "FROM \"" + tableName + "$files\" dv " +
+                        "JOIN \"" + tableName + "$files\" df ON dv.content = 1 AND df.content = 0"))
+                .matches("VALUES (true)");
+
         assertUpdate("DROP TABLE " + tableName);
     }
 
@@ -1237,6 +1373,31 @@ public class TestIcebergV3
             // Check DV via $files: cardinality 500, 10 PUFFIN entries, 1 file
             assertThat(query("SELECT sum(record_count), count(*), count_if(file_format = 'PUFFIN'), count(distinct file_path) FROM \"" + table.getName() + "$files\" WHERE content = 1"))
                     .matches("VALUES (BIGINT '500', BIGINT '10', BIGINT '10', BIGINT '1')");
+
+            // Verify new columns for DVs: delete-specific columns are set, sequence numbers and manifest_location present
+            assertThat(query(
+                    "SELECT bool_and(referenced_data_file IS NOT NULL), " +
+                            "bool_and(content_offset IS NOT NULL), " +
+                            "bool_and(content_size_in_bytes IS NOT NULL AND content_size_in_bytes > 0), " +
+                            "bool_and(file_sequence_number IS NOT NULL), " +
+                            "bool_and(manifest_location IS NOT NULL) " +
+                            "FROM \"" + table.getName() + "$files\" WHERE content = 1"))
+                    .matches("VALUES (true, true, true, true, true)");
+
+            // Verify data files have NULL for delete-specific columns
+            assertThat(query(
+                    "SELECT bool_and(referenced_data_file IS NULL), " +
+                            "bool_and(content_offset IS NULL), " +
+                            "bool_and(content_size_in_bytes IS NULL) " +
+                            "FROM \"" + table.getName() + "$files\" WHERE content = 0"))
+                    .matches("VALUES (true, true, true)");
+
+            // Verify referenced_data_file for each DV matches an actual data file path
+            assertThat(query(
+                    "SELECT count(*) FROM \"" + table.getName() + "$files\" dv " +
+                            "WHERE dv.content = 1 AND dv.referenced_data_file IN " +
+                            "(SELECT file_path FROM \"" + table.getName() + "$files\" WHERE content = 0)"))
+                    .matches("SELECT count(*) FROM \"" + table.getName() + "$files\" WHERE content = 1");
 
             // delete multiples of 5 => 100 rows removed
             assertUpdate("DELETE FROM " + table.getName() + " WHERE id % 5 = 0", 100);
@@ -1391,41 +1552,398 @@ public class TestIcebergV3
         }
     }
 
-    private void injectEncryptionKeysIntoMetadataJson(Path tableLocation, String keyId)
-            throws IOException
+    @Test
+    void testOrcTimestampNanoFiltering()
     {
-        Path metadataFile = Path.of(getLatestMetadataLocation(fileSystemFactory.create(SESSION), tableLocation.toString()));
+        String tableName = "test_orc_timestamp_nano_filtering_" + randomNameSuffix();
+        try {
+            assertUpdate("CREATE TABLE " + tableName + " (d TIMESTAMP(9), b INTEGER) WITH (format = 'ORC')");
 
-        JsonMapper jsonMapper = new JsonMapper();
-        ObjectNode root = (ObjectNode) jsonMapper.readTree(metadataFile.toFile());
+            // Insert data with nanosecond precision
+            assertUpdate("INSERT INTO " + tableName + " VALUES " +
+                    "(TIMESTAMP '2024-01-15 10:00:00.000000001', 1)," +
+                    "(TIMESTAMP '2024-01-15 10:59:59.999999999', 2)," +
+                    "(TIMESTAMP '2024-01-15 11:00:00.000000001', 3)," +
+                    "(TIMESTAMP '2024-01-15 11:30:45.123456789', 4)", 4);
 
-        // Add "encryption-keys" - any valid base64 is fine for this test; we only care that Iceberg parses it.
-        ObjectNode key = mapper.createObjectNode();
-        key.put("key-id", keyId);
-        key.put("encrypted-key-metadata", "AA==");
-        ArrayNode keys = mapper.createArrayNode();
-        keys.add(key);
-        root.set("encryption-keys", keys);
+            // Debug: Check what's actually in the table
+            assertThat(query("SELECT d, b FROM " + tableName + " ORDER BY b"))
+                    .matches("VALUES " +
+                            "(TIMESTAMP '2024-01-15 10:00:00.000000001', INTEGER '1'), " +
+                            "(TIMESTAMP '2024-01-15 10:59:59.999999999', INTEGER '2'), " +
+                            "(TIMESTAMP '2024-01-15 11:00:00.000000001', INTEGER '3'), " +
+                            "(TIMESTAMP '2024-01-15 11:30:45.123456789', INTEGER '4')");
 
-        // Set current snapshot's "key-id"
-        JsonNode currentSnapshotIdNode = root.get("current-snapshot-id");
-        if (currentSnapshotIdNode != null && currentSnapshotIdNode.isNumber()) {
-            long currentSnapshotId = currentSnapshotIdNode.asLong();
-            ArrayNode snapshots = (ArrayNode) root.get("snapshots");
-            if (snapshots != null) {
-                for (JsonNode snapshotNode : snapshots) {
-                    JsonNode snapshotIdNode = snapshotNode.get("snapshot-id");
-                    if (snapshotIdNode != null && snapshotIdNode.asLong() == currentSnapshotId) {
-                        ((ObjectNode) snapshotNode).put("key-id", keyId);
-                        break;
-                    }
+            // Test filter at hour boundary - this is the failing case
+            assertThat(query("SELECT b FROM " + tableName + " WHERE d >= TIMESTAMP '2024-01-15 11:00:00.000000000' ORDER BY b"))
+                    .matches("VALUES INTEGER '3', INTEGER '4'");
+
+            // Test filter with slightly later timestamp
+            assertThat(query("SELECT b FROM " + tableName + " WHERE d >= TIMESTAMP '2024-01-15 11:00:00.000000001' ORDER BY b"))
+                    .matches("VALUES INTEGER '3', INTEGER '4'");
+
+            // Test filter that should return all rows
+            assertThat(query("SELECT b FROM " + tableName + " WHERE d >= TIMESTAMP '2024-01-15 10:00:00.000000000' ORDER BY b"))
+                    .matches("VALUES INTEGER '1', INTEGER '2', INTEGER '3', INTEGER '4'");
+
+            // Test filter that should return first two rows
+            assertThat(query("SELECT b FROM " + tableName + " WHERE d < TIMESTAMP '2024-01-15 11:00:00.000000000' ORDER BY b"))
+                    .matches("VALUES INTEGER '1', INTEGER '2'");
+        }
+        finally {
+            assertUpdate("DROP TABLE IF EXISTS " + tableName);
+        }
+    }
+
+    private ParquetMetadata getOnlyParquetDataFileMetadata(String tableName)
+    {
+        BaseTable table = loadTable(tableName);
+        table.refresh();
+        DataFile dataFile = getOnlyElement(table.currentSnapshot().addedDataFiles(table.io()));
+        return getParquetFileMetadata(fileSystemFactory.create(SESSION).newInputFile(Location.of(dataFile.location())));
+    }
+
+    @Test
+    void testGeometryTypeJsonSerialization()
+    {
+        GeometryType defaultGeomType = Types.GeometryType.of("OGC:CRS84");
+        assertThat(defaultGeomType.crs()).isEqualTo("OGC:CRS84");
+
+        GeometryType epsg3857 = Types.GeometryType.of("EPSG:3857");
+        assertThat(epsg3857.crs()).isEqualTo("EPSG:3857");
+
+        Schema schema = new Schema(
+                Types.NestedField.optional(1, "geom_default", Types.GeometryType.of("OGC:CRS84")),
+                Types.NestedField.optional(2, "geom_3857", Types.GeometryType.of("EPSG:3857")));
+        String json = SchemaParser.toJson(schema);
+
+        Schema parsed = SchemaParser.fromJson(json);
+
+        Types.GeometryType parsedDefault = (Types.GeometryType) parsed.findField("geom_default").type();
+        assertThat(parsedDefault.crs()).isEqualTo("OGC:CRS84");
+
+        Types.GeometryType parsed3857 = (Types.GeometryType) parsed.findField("geom_3857").type();
+        assertThat(parsed3857.crs()).isEqualTo("EPSG:3857");
+    }
+
+    @Test
+    void testGeometryWithCustomSrid()
+    {
+        String hadoopTableName = "hadoop_geometry_srid_" + randomNameSuffix();
+        Path hadoopTableLocation = dataDirectory.resolve(hadoopTableName);
+
+        Schema schema = new Schema(
+                Types.NestedField.optional(1, "id", Types.IntegerType.get()),
+                Types.NestedField.optional(2, "geom", Types.GeometryType.of("EPSG:3857")));
+
+        HADOOP_TABLES.create(
+                schema,
+                PartitionSpec.unpartitioned(),
+                SortOrder.unsorted(),
+                ImmutableMap.of(
+                        "format-version", "3",
+                        "write.format.default", "PARQUET"),
+                hadoopTableLocation.toString());
+
+        String registered = "registered_geom_srid_" + randomNameSuffix();
+        assertUpdate("CALL system.register_table(CURRENT_SCHEMA, '%s', '%s')"
+                .formatted(registered, hadoopTableLocation));
+
+        assertThat(query("SELECT * FROM " + registered))
+                .returnsEmptyResult();
+
+        assertThat(query("DESCRIBE " + registered))
+                .matches("VALUES (VARCHAR 'id', VARCHAR 'integer', VARCHAR '', VARCHAR ''), " +
+                        "(VARCHAR 'geom', VARCHAR 'Geometry', VARCHAR '', VARCHAR '')");
+
+        assertUpdate("INSERT INTO " + registered + " VALUES (1, ST_SetSRID(ST_GeometryFromText('POINT Z (1 2 3)'), 3857))", 1);
+
+        assertThat(query("SELECT ST_AsEWKT(geom) FROM " + registered))
+                .matches("VALUES VARCHAR 'SRID=3857;POINT Z (1 2 3)'");
+
+        assertThat(getOnlyParquetDataFileMetadata(registered).getFileMetaData().getSchema().getType("geom").asPrimitiveType().getLogicalTypeAnnotation())
+                .isEqualTo(geometryType("EPSG:3857"));
+
+        assertUpdate("DROP TABLE " + registered);
+    }
+
+    @Test
+    void testGeometryRoundTrip()
+    {
+        for (String format : List.of("PARQUET", "ORC", "AVRO")) {
+            try (TestTable table = newTrinoTable(
+                    "test_geometry_roundtrip_" + format.toLowerCase(Locale.ROOT) + "_",
+                    "(id INTEGER, geom geometry) WITH (format = '" + format + "', format_version = 3)")) {
+                assertUpdate("INSERT INTO " + table.getName() + " VALUES (1, ST_GeometryFromText('POINT Z (1 2 3)'))", 1);
+                assertUpdate("INSERT INTO " + table.getName() + " VALUES (2, ST_GeometryFromText('POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))'))", 1);
+
+                assertThat(query("SELECT id, ST_AsEWKT(geom) FROM " + table.getName() + " ORDER BY id"))
+                        .matches("VALUES " +
+                                "(1, VARCHAR 'SRID=4326;POINT Z (1 2 3)'), " +
+                                "(2, VARCHAR 'SRID=4326;POLYGON ((0 0, 1 0, 1 1, 0 1, 0 0))')");
+            }
+        }
+    }
+
+    @Test
+    void testNestedGeometryRoundTrip()
+    {
+        for (String format : ALL_FILE_FORMATS) {
+            for (NestedGeometryContainer container : nestedGeometryContainers()) {
+                try (TestTable table = newTrinoTable(
+                        "test_nested_geometry_roundtrip_" + container.name() + "_" + format.toLowerCase(Locale.ROOT) + "_",
+                        "(id INTEGER, payload " + container.columnType() + ") WITH (format = '" + format + "', format_version = 3)")) {
+                    assertUpdate("INSERT INTO " + table.getName() + " VALUES " +
+                            "(1, " + container.firstValue() + "), " +
+                            "(2, " + container.secondValue() + ")", 2);
+
+                    assertThat(query("SELECT id, ST_AsEWKT(" + container.geometryExpression() + ") FROM " + table.getName() + " ORDER BY id"))
+                            .matches("VALUES " +
+                                    "(1, VARCHAR 'SRID=4326;POINT Z (1 2 3)'), " +
+                                    "(2, VARCHAR 'SRID=4326;POLYGON ((0 0, 1 0, 1 1, 0 1, 0 0))')");
                 }
             }
         }
+    }
 
-        Files.writeString(metadataFile, mapper.writeValueAsString(root));
-        // delete the crc file, since it is no longer valid
-        Path crc = metadataFile.resolveSibling("." + metadataFile.getFileName() + ".crc");
-        Files.deleteIfExists(crc);
+    private static List<NestedGeometryContainer> nestedGeometryContainers()
+    {
+        return List.of(
+                new NestedGeometryContainer(
+                        "row",
+                        "ROW(geom geometry)",
+                        "CAST(ROW(ST_GeometryFromText('POINT Z (1 2 3)')) AS ROW(geom geometry))",
+                        "CAST(ROW(ST_GeometryFromText('POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))')) AS ROW(geom geometry))",
+                        "payload.geom"),
+                new NestedGeometryContainer(
+                        "array",
+                        "ARRAY(geometry)",
+                        "ARRAY[ST_GeometryFromText('POINT Z (1 2 3)')]",
+                        "ARRAY[ST_GeometryFromText('POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))')]",
+                        "payload[1]"),
+                new NestedGeometryContainer(
+                        "map",
+                        "MAP(VARCHAR, geometry)",
+                        "map(ARRAY['geom'], ARRAY[ST_GeometryFromText('POINT Z (1 2 3)')])",
+                        "map(ARRAY['geom'], ARRAY[ST_GeometryFromText('POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))')])",
+                        "payload['geom']"));
+    }
+
+    private record NestedGeometryContainer(
+            String name,
+            String columnType,
+            String firstValue,
+            String secondValue,
+            String geometryExpression) {}
+
+    @Test
+    void testGeographyRoundTrip()
+    {
+        for (String format : ALL_FILE_FORMATS) {
+            try (TestTable table = newTrinoTable(
+                    "test_geography_roundtrip_" + format.toLowerCase(Locale.ROOT) + "_",
+                    "(id INTEGER, geog sphericalgeography) WITH (format = '" + format + "', format_version = 3)")) {
+                assertUpdate("INSERT INTO " + table.getName() + " VALUES (1, to_spherical_geography(ST_Point(-122.4194, 37.7749)))", 1);
+                assertUpdate("INSERT INTO " + table.getName() + " VALUES (2, to_spherical_geography(ST_Point(12.5, -45.25)))", 1);
+
+                assertThat(query("SELECT id, ST_AsText(to_geometry(geog)), ST_SRID(to_geometry(geog)) FROM " + table.getName() + " ORDER BY id"))
+                        .matches("VALUES " +
+                                "(1, VARCHAR 'POINT (-122.4194 37.7749)', 4326), " +
+                                "(2, VARCHAR 'POINT (12.5 -45.25)', 4326)");
+            }
+        }
+    }
+
+    @Test
+    void testWriteSridMismatchFails()
+    {
+        try (TestTable table = newTrinoTable(
+                "test_srid_mismatch_",
+                "(geom geometry) WITH (format = 'PARQUET', format_version = 3)")) {
+            assertThat(query("INSERT INTO " + table.getName() + " SELECT ST_SetSRID(ST_Point(1, 1), 3857)"))
+                    .failure()
+                    .hasMessageContaining("SRID mismatch");
+        }
+    }
+
+    @Test
+    void testWriteSridZeroAllowed()
+    {
+        try (TestTable table = newTrinoTable(
+                "test_srid_zero_",
+                "(geom geometry) WITH (format = 'PARQUET', format_version = 3)")) {
+            assertUpdate("INSERT INTO " + table.getName() + " SELECT ST_Point(1, 1)", 1);
+            assertUpdate("INSERT INTO " + table.getName() + " SELECT ST_SetSRID(ST_Point(2, 2), 4326)", 1);
+
+            assertThat(query("SELECT ST_AsText(geom), ST_SRID(geom) FROM " + table.getName() + " ORDER BY 1"))
+                    .matches("VALUES (VARCHAR 'POINT (1 1)', 4326), (VARCHAR 'POINT (2 2)', 4326)");
+        }
+    }
+
+    @Test
+    void testWriteSridZeroToCustomCrsFails()
+    {
+        String hadoopTableName = "hadoop_geometry_custom_srid_zero_" + randomNameSuffix();
+        Path hadoopTableLocation = dataDirectory.resolve(hadoopTableName);
+
+        Schema schema = new Schema(
+                Types.NestedField.optional(1, "id", Types.IntegerType.get()),
+                Types.NestedField.optional(2, "geom", Types.GeometryType.of("EPSG:3857")));
+
+        HADOOP_TABLES.create(
+                schema,
+                PartitionSpec.unpartitioned(),
+                SortOrder.unsorted(),
+                ImmutableMap.of(
+                        "format-version", "3",
+                        "write.format.default", "PARQUET"),
+                hadoopTableLocation.toString());
+
+        String registered = "registered_geom_custom_srid_zero_" + randomNameSuffix();
+        assertUpdate("CALL system.register_table(CURRENT_SCHEMA, '%s', '%s')"
+                .formatted(registered, hadoopTableLocation));
+
+        assertThat(query("INSERT INTO " + registered + " VALUES (1, ST_Point(1, 2))"))
+                .failure()
+                .hasMessageContaining("unknown SRID");
+
+        assertUpdate("DROP TABLE " + registered);
+    }
+
+    @Test
+    void testWriteCustomSridAllowedWhenMatching()
+    {
+        String hadoopTableName = "hadoop_geometry_custom_srid_match_" + randomNameSuffix();
+        Path hadoopTableLocation = dataDirectory.resolve(hadoopTableName);
+
+        Schema schema = new Schema(
+                Types.NestedField.optional(1, "id", Types.IntegerType.get()),
+                Types.NestedField.optional(2, "geom", Types.GeometryType.of("EPSG:3857")));
+
+        HADOOP_TABLES.create(
+                schema,
+                PartitionSpec.unpartitioned(),
+                SortOrder.unsorted(),
+                ImmutableMap.of(
+                        "format-version", "3",
+                        "write.format.default", "PARQUET"),
+                hadoopTableLocation.toString());
+
+        String registered = "registered_geom_custom_srid_match_" + randomNameSuffix();
+        assertUpdate("CALL system.register_table(CURRENT_SCHEMA, '%s', '%s')"
+                .formatted(registered, hadoopTableLocation));
+
+        assertUpdate("INSERT INTO " + registered + " VALUES (1, ST_SetSRID(ST_GeometryFromText('POINT Z (1 2 3)'), 3857))", 1);
+
+        assertThat(query("SELECT ST_AsEWKT(geom) FROM " + registered))
+                .matches("VALUES VARCHAR 'SRID=3857;POINT Z (1 2 3)'");
+
+        assertUpdate("DROP TABLE " + registered);
+    }
+
+    @Test
+    void testUnsupportedGeographyAlgorithm()
+    {
+        String hadoopTableName = "hadoop_unsupported_algo_" + randomNameSuffix();
+        Path hadoopTableLocation = dataDirectory.resolve(hadoopTableName);
+
+        Schema schema = new Schema(
+                Types.NestedField.optional(1, "id", Types.IntegerType.get()),
+                Types.NestedField.optional(2, "geog", Types.GeographyType.of("OGC:CRS84", EdgeAlgorithm.VINCENTY)));
+
+        HADOOP_TABLES.create(
+                schema,
+                PartitionSpec.unpartitioned(),
+                SortOrder.unsorted(),
+                ImmutableMap.of(
+                        "format-version", "3",
+                        "write.format.default", "PARQUET"),
+                hadoopTableLocation.toString());
+
+        String registered = "registered_unsupported_algo_" + randomNameSuffix();
+        assertUpdate("CALL system.register_table(CURRENT_SCHEMA, '%s', '%s')"
+                .formatted(registered, hadoopTableLocation));
+
+        assertQueryFails(
+                "SELECT * FROM " + registered,
+                ".*Unsupported geography algorithm.*");
+
+        assertUpdate("DROP TABLE " + registered);
+    }
+
+    @Test
+    void testUnsupportedGeographyCrs()
+    {
+        String hadoopTableName = "hadoop_unsupported_crs_" + randomNameSuffix();
+        Path hadoopTableLocation = dataDirectory.resolve(hadoopTableName);
+
+        Schema schema = new Schema(
+                Types.NestedField.optional(1, "id", Types.IntegerType.get()),
+                Types.NestedField.optional(2, "geog", Types.GeographyType.of("EPSG:3857", EdgeAlgorithm.SPHERICAL)));
+
+        HADOOP_TABLES.create(
+                schema,
+                PartitionSpec.unpartitioned(),
+                SortOrder.unsorted(),
+                ImmutableMap.of(
+                        "format-version", "3",
+                        "write.format.default", "PARQUET"),
+                hadoopTableLocation.toString());
+
+        String registered = "registered_unsupported_crs_" + randomNameSuffix();
+        assertUpdate("CALL system.register_table(CURRENT_SCHEMA, '%s', '%s')"
+                .formatted(registered, hadoopTableLocation));
+
+        assertQueryFails(
+                "SELECT * FROM " + registered,
+                ".*Unsupported geography CRS.*");
+
+        assertUpdate("DROP TABLE " + registered);
+    }
+
+    @Test
+    void testOrcTimestampNanoWithTimeZoneFiltering()
+    {
+        String tableName = "test_orc_timestamp_nano_tz_filtering_" + randomNameSuffix();
+        try {
+            assertUpdate("CREATE TABLE " + tableName + " (d TIMESTAMP(9) WITH TIME ZONE, b INTEGER) WITH (format = 'ORC')");
+
+            // Insert data with nanosecond precision
+            assertUpdate("INSERT INTO " + tableName + " VALUES " +
+                    "(TIMESTAMP '2024-01-15 10:00:00.000000001 UTC', 1)," +
+                    "(TIMESTAMP '2024-01-15 10:59:59.999999999 UTC', 2)," +
+                    "(TIMESTAMP '2024-01-15 11:00:00.000000001 UTC', 3)," +
+                    "(TIMESTAMP '2024-01-15 11:30:45.123456789 UTC', 4)", 4);
+
+            // Debug: Check what's actually in the table
+            assertThat(query("SELECT d, b FROM " + tableName + " ORDER BY b"))
+                    .matches("VALUES " +
+                            "(TIMESTAMP '2024-01-15 10:00:00.000000001 UTC', INTEGER '1'), " +
+                            "(TIMESTAMP '2024-01-15 10:59:59.999999999 UTC', INTEGER '2'), " +
+                            "(TIMESTAMP '2024-01-15 11:00:00.000000001 UTC', INTEGER '3'), " +
+                            "(TIMESTAMP '2024-01-15 11:30:45.123456789 UTC', INTEGER '4')");
+
+            // Test filter at hour boundary - this is the failing case
+            assertThat(query("SELECT b FROM " + tableName + " WHERE d >= TIMESTAMP '2024-01-15 11:00:00.000000000 UTC' ORDER BY b"))
+                    .matches("VALUES INTEGER '3', INTEGER '4'");
+        }
+        finally {
+            assertUpdate("DROP TABLE IF EXISTS " + tableName);
+        }
+    }
+
+    private Table createV3Table(String tableName, Schema schema)
+    {
+        SchemaTableName schemaTableName = new SchemaTableName(getSession().getSchema().orElseThrow(), tableName);
+        catalog.newCreateTableTransaction(
+                        SESSION,
+                        schemaTableName,
+                        schema,
+                        PartitionSpec.unpartitioned(),
+                        SortOrder.unsorted(),
+                        Optional.ofNullable(catalog.defaultTableLocation(SESSION, schemaTableName)),
+                        ImmutableMap.of(FORMAT_VERSION, "3"))
+                .commitTransaction();
+        return loadTable(schemaTableName.getTableName());
     }
 }

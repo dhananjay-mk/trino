@@ -5,12 +5,12 @@
     <parent>
         <groupId>io.airlift</groupId>
         <artifactId>airbase</artifactId>
-        <version>364</version>
+        <version>395</version>
     </parent>
 
     <groupId>io.trino</groupId>
     <artifactId>trino-root</artifactId>
-    <version>480</version>
+    <version>483</version>
     <packaging>pom</packaging>
 
     <name>${project.artifactId}</name>
@@ -43,12 +43,13 @@
         <module>lib/trino-array</module>
         <module>lib/trino-cache</module>
         <module>lib/trino-filesystem</module>
-        <module>lib/trino-filesystem-alluxio</module>
         <module>lib/trino-filesystem-azure</module>
         <module>lib/trino-filesystem-cache-alluxio</module>
         <module>lib/trino-filesystem-gcs</module>
         <module>lib/trino-filesystem-manager</module>
         <module>lib/trino-filesystem-s3</module>
+        <module>lib/trino-geospatial-epsg</module>
+        <module>lib/trino-geospatial-epsg-generator</module>
         <module>lib/trino-geospatial-toolkit</module>
         <module>lib/trino-hdfs</module>
         <module>lib/trino-hive-formats</module>
@@ -143,14 +144,14 @@
     <scm child.scm.connection.inherit.append.path="false" child.scm.developerConnection.inherit.append.path="false" child.scm.url.inherit.append.path="false">
         <connection>scm:git:git://github.com/trinodb/trino.git</connection>
         <developerConnection>scm:git:git@github.com:trinodb/trino.git</developerConnection>
-        <tag>480</tag>
+        <tag>483</tag>
         <url>https://github.com/trinodb/trino</url>
     </scm>
 
     <properties>
         <project.build.targetJdk>25</project.build.targetJdk>
         <!-- for reproducible build support, updated by release plugin -->
-        <project.build.outputTimestamp>2026-03-24T22:01:45Z</project.build.outputTimestamp>
+        <project.build.outputTimestamp>2026-07-18T00:36:39Z</project.build.outputTimestamp>
         <!-- TODO remove this property when no module overrides it -->
         <trino.error-prone.guarded-by>ERROR</trino.error-prone.guarded-by>
 
@@ -160,7 +161,7 @@
         <air.java.version>25.0.1</air.java.version>
         <!-- Temurin JVM release used in the docker image and for product test environments -->
         <!-- https://api.adoptium.net/q/swagger-ui/#/Release%20Info/getReleaseNames -->
-        <temurin.release>jdk-25.0.2+10</temurin.release>
+        <temurin.release>jdk-25.0.3+9</temurin.release>
         <air.javadoc.lint>syntax,reference,html,-missing</air.javadoc.lint>
         <air.modernizer.java-version>${project.build.targetJdk}</air.modernizer.java-version>
         <air.release.preparation-goals>clean verify -DskipTests</air.release.preparation-goals>
@@ -185,47 +186,39 @@
         <air.test.jvm.additional-arguments>${air.test.jvm.additional-arguments.default}</air.test.jvm.additional-arguments>
 
         <!-- keep dependency properties sorted -->
-        <dep.airlift.version>419</dep.airlift.version>
+        <dep.airlift.version>439</dep.airlift.version>
         <dep.alluxio.version>2.9.6</dep.alluxio.version>
         <dep.antlr.version>4.13.2</dep.antlr.version>
         <dep.avro.version>1.12.1</dep.avro.version>
-        <dep.aws-sdk.version>1.12.797</dep.aws-sdk.version>
         <dep.cassandra.version>4.17.0</dep.cassandra.version>
         <dep.confluent.version>8.1.1</dep.confluent.version>
-        <dep.docker.images.version>123</dep.docker.images.version>
+        <dep.derby.version>10.17.1.0</dep.derby.version>
+        <dep.docker.images.version>127</dep.docker.images.version>
         <dep.drift.version>1.24</dep.drift.version>
-        <dep.frontend-maven-plugin.version>2.0.0</dep.frontend-maven-plugin.version>
-        <dep.frontend-node.version>v24.12.0</dep.frontend-node.version>
-        <dep.frontend-npm.version>11.7.0</dep.frontend-npm.version>
+        <dep.frontend-maven-plugin.version>2.0.1</dep.frontend-maven-plugin.version>
+        <dep.frontend-bun.version>v1.3.14</dep.frontend-bun.version>
+        <dep.geoapi.version>3.0.2</dep.geoapi.version>
         <dep.httpcore5.version>5.4.3</dep.httpcore5.version>
-        <dep.iceberg.version>1.10.1</dep.iceberg.version>
-        <!-- override airbase 364 (2.21.2): CVE-2026-54512, CVE-2026-54513, GHSA-r7wm-3cxj-wff9 -->
-        <dep.jackson.version>2.21.6</dep.jackson.version>
-        <!-- override airbase 364 (3.1.0): CVE-2026-54512, CVE-2026-54513, GHSA-2m67-wjpj-xhg9.
-             Reaches the distribution through flyway-core in plugin/resource-group-managers. -->
-        <dep.jackson3.version>3.1.6</dep.jackson3.version>
-        <!-- override airbase 364 (12.1.7): CVE-2026-10050, patched in 12.1.10.
-             Do NOT go past 12.1.10: in 12.1.11 Jetty moved RateControl from
-             org.eclipse.jetty.http2 to org.eclipse.jetty.io, so airlift 419's
-             http-server fails at runtime with NoSuchMethodError on
-             AbstractHTTP2ServerConnectionFactory.setRateControlFactory. -->
-        <dep.jetty.version>12.1.10</dep.jetty.version>
-        <dep.jna.version>5.18.1</dep.jna.version>
+        <dep.iceberg.version>1.11.0</dep.iceberg.version>
+        <dep.jna.version>5.19.1</dep.jna.version>
         <dep.jsonwebtoken.version>0.13.0</dep.jsonwebtoken.version>
         <dep.jts.version>1.20.0</dep.jts.version>
-        <!-- override airbase 364 (315): the launcher is a Go binary; 321 is built with go1.26.5
+        <!-- override airbase 395 (318): the launcher is a Go binary; 321 is built with go1.26.5
              and golang.org/x/text v0.40.0, clearing CVE-2026-56852 and 12 of the 20 reported
              Go stdlib CVEs. The remaining 8 need a launcher built with go1.26.6+. -->
         <dep.launcher.version>321</dep.launcher.version>
-        <dep.okhttp.version>5.3.2</dep.okhttp.version>
-        <dep.okio.version>3.17.0</dep.okio.version>
+        <!-- override airbase 395 (4.2.16.Final): 39 reported netty CVE rows, fixed in 4.2.17.Final -->
         <dep.netty.version>4.2.17.Final</dep.netty.version>
-        <dep.parquet.version>1.17.0</dep.parquet.version>
-        <dep.protobuf.version>4.34.1</dep.protobuf.version>
-        <dep.swagger.version>2.2.45</dep.swagger.version>
-        <dep.takari.version>2.3.2</dep.takari.version>
-        <dep.tcnative.version>2.0.75.Final</dep.tcnative.version>
-        <dep.tempto.version>202</dep.tempto.version>
+        <dep.okhttp.version>5.4.0</dep.okhttp.version>
+        <dep.okio.version>3.17.0</dep.okio.version>
+        <dep.parquet.version>1.17.1</dep.parquet.version>
+        <dep.protobuf.version>4.35.1</dep.protobuf.version>
+        <dep.sis.version>1.6</dep.sis.version>
+        <dep.swagger.version>2.2.52</dep.swagger.version>
+        <dep.takari.version>2.3.4</dep.takari.version>
+        <dep.tcnative.version>2.0.80.Final</dep.tcnative.version>
+        <dep.tempto.version>204</dep.tempto.version>
+        <dep.testng.version>7.8.0</dep.testng.version>
         <dep.zookeeper.version>3.9.5</dep.zookeeper.version>
         <extraJavaVectorArgs>--add-modules=jdk.incubator.vector</extraJavaVectorArgs>
         <!--
@@ -241,7 +234,7 @@
             <dependency>
                 <groupId>com.azure</groupId>
                 <artifactId>azure-sdk-bom</artifactId>
-                <version>1.3.5</version>
+                <version>1.3.7</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -257,7 +250,7 @@
             <dependency>
                 <groupId>com.google.cloud</groupId>
                 <artifactId>libraries-bom</artifactId>
-                <version>26.78.0</version>
+                <version>26.85.0</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -265,7 +258,7 @@
             <dependency>
                 <groupId>com.oracle.database.jdbc</groupId>
                 <artifactId>ojdbc11-production</artifactId>
-                <version>23.26.1.0.0</version>
+                <version>23.26.2.0.0</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -304,6 +297,14 @@
             </dependency>
 
             <dependency>
+                <groupId>io.projectreactor</groupId>
+                <artifactId>reactor-bom</artifactId>
+                <version>2025.0.6</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <dependency>
                 <groupId>org.apache.arrow</groupId>
                 <artifactId>arrow-bom</artifactId>
                 <version>19.0.0</version>
@@ -314,7 +315,7 @@
             <dependency>
                 <groupId>org.jdbi</groupId>
                 <artifactId>jdbi3-bom</artifactId>
-                <version>3.52.0</version>
+                <version>3.54.0</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -322,7 +323,7 @@
             <dependency>
                 <groupId>org.testcontainers</groupId>
                 <artifactId>testcontainers-bom</artifactId>
-                <version>2.0.4</version>
+                <version>2.0.5</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -330,7 +331,7 @@
             <dependency>
                 <groupId>software.amazon.awssdk</groupId>
                 <artifactId>bom</artifactId>
-                <version>2.42.18</version>
+                <version>2.47.4</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -340,67 +341,19 @@
                 <!-- https://github.com/ClickHouse/clickhouse-docs/pull/2408/files -->
                 <groupId>at.yawk.lz4</groupId>
                 <artifactId>lz4-java</artifactId>
-                <version>1.10.4</version>
+                <version>1.11.1</version>
             </dependency>
 
             <dependency>
                 <groupId>com.adobe.testing</groupId>
                 <artifactId>s3mock-testcontainers</artifactId>
-                <version>4.11.0</version>
-            </dependency>
-
-            <dependency>
-                <groupId>com.amazonaws</groupId>
-                <artifactId>aws-java-sdk-core</artifactId>
-                <version>${dep.aws-sdk.version}</version>
-                <exclusions>
-                    <exclusion>
-                        <groupId>commons-logging</groupId>
-                        <artifactId>commons-logging</artifactId>
-                    </exclusion>
-                    <exclusion>
-                        <groupId>joda-time</groupId>
-                        <artifactId>joda-time</artifactId>
-                    </exclusion>
-                </exclusions>
-            </dependency>
-
-            <dependency>
-                <groupId>com.amazonaws</groupId>
-                <artifactId>aws-java-sdk-s3</artifactId>
-                <version>${dep.aws-sdk.version}</version>
-                <exclusions>
-                    <exclusion>
-                        <groupId>commons-logging</groupId>
-                        <artifactId>commons-logging</artifactId>
-                    </exclusion>
-                    <exclusion>
-                        <groupId>joda-time</groupId>
-                        <artifactId>joda-time</artifactId>
-                    </exclusion>
-                </exclusions>
-            </dependency>
-
-            <dependency>
-                <groupId>com.amazonaws</groupId>
-                <artifactId>aws-java-sdk-sts</artifactId>
-                <version>${dep.aws-sdk.version}</version>
-                <exclusions>
-                    <exclusion>
-                        <groupId>commons-logging</groupId>
-                        <artifactId>commons-logging</artifactId>
-                    </exclusion>
-                    <exclusion>
-                        <groupId>joda-time</groupId>
-                        <artifactId>joda-time</artifactId>
-                    </exclusion>
-                </exclusions>
+                <version>5.1.0</version>
             </dependency>
 
             <dependency>
                 <groupId>com.azure</groupId>
                 <artifactId>azure-core-tracing-opentelemetry</artifactId>
-                <version>1.0.0-beta.62</version>
+                <version>1.0.0-beta.64</version>
                 <exclusions>
                     <exclusion>
                         <groupId>com.azure</groupId>
@@ -418,8 +371,14 @@
             <dependency>
                 <groupId>com.clickhouse</groupId>
                 <artifactId>clickhouse-jdbc</artifactId>
-                <version>0.7.1-patch1</version>
+                <version>0.9.8</version>
                 <classifier>all</classifier>
+                <exclusions>
+                    <exclusion>
+                        <groupId>com.google.guava</groupId>
+                        <artifactId>listenablefuture</artifactId>
+                    </exclusion>
+                </exclusions>
             </dependency>
 
             <dependency>
@@ -429,15 +388,9 @@
             </dependency>
 
             <dependency>
-                <groupId>com.esri.geometry</groupId>
-                <artifactId>esri-geometry-api</artifactId>
-                <version>2.2.4</version>
-            </dependency>
-
-            <dependency>
                 <groupId>com.exasol</groupId>
                 <artifactId>exasol-jdbc</artifactId>
-                <version>26.2.7</version>
+                <version>26.2.8</version>
             </dependency>
 
             <dependency>
@@ -449,13 +402,13 @@
             <dependency>
                 <groupId>com.fasterxml.woodstox</groupId>
                 <artifactId>woodstox-core</artifactId>
-                <version>7.1.1</version>
+                <version>7.2.1</version>
             </dependency>
 
             <dependency>
                 <groupId>com.github.ben-manes.caffeine</groupId>
                 <artifactId>caffeine</artifactId>
-                <version>3.2.3</version>
+                <version>3.2.4</version>
             </dependency>
 
             <dependency>
@@ -467,7 +420,7 @@
             <dependency>
                 <groupId>com.google.cloud.bigdataoss</groupId>
                 <artifactId>gcs-connector</artifactId>
-                <version>4.0.3</version>
+                <version>4.0.4</version>
                 <classifier>shaded</classifier>
                 <exclusions>
                     <exclusion>
@@ -481,7 +434,7 @@
             <dependency>
                 <groupId>com.google.code.gson</groupId>
                 <artifactId>gson</artifactId>
-                <version>2.13.2</version>
+                <version>2.14.0</version>
             </dependency>
 
             <dependency>
@@ -529,7 +482,7 @@
             <dependency>
                 <groupId>com.mysql</groupId>
                 <artifactId>mysql-connector-j</artifactId>
-                <version>9.6.0</version>
+                <version>9.7.0</version>
                 <exclusions>
                     <exclusion>
                         <groupId>com.google.protobuf</groupId>
@@ -541,13 +494,13 @@
             <dependency>
                 <groupId>com.nimbusds</groupId>
                 <artifactId>nimbus-jose-jwt</artifactId>
-                <version>10.8</version>
+                <version>10.9.1</version>
             </dependency>
 
             <dependency>
                 <groupId>com.nimbusds</groupId>
                 <artifactId>oauth2-oidc-sdk</artifactId>
-                <version>11.34</version>
+                <version>11.37.2</version>
             </dependency>
 
             <dependency>
@@ -589,13 +542,13 @@
             <dependency>
                 <groupId>commons-codec</groupId>
                 <artifactId>commons-codec</artifactId>
-                <version>1.21.0</version>
+                <version>1.22.0</version>
             </dependency>
 
             <dependency>
                 <groupId>commons-io</groupId>
                 <artifactId>commons-io</artifactId>
-                <version>2.21.0</version>
+                <version>2.22.0</version>
             </dependency>
 
             <dependency>
@@ -626,7 +579,7 @@
             <dependency>
                 <groupId>io.airlift</groupId>
                 <artifactId>aircompressor-v3</artifactId>
-                <version>3.5</version>
+                <version>3.7</version>
             </dependency>
 
             <dependency>
@@ -650,7 +603,7 @@
             <dependency>
                 <groupId>io.airlift</groupId>
                 <artifactId>units</artifactId>
-                <version>1.12</version>
+                <version>1.13</version>
             </dependency>
 
             <dependency>
@@ -793,7 +746,7 @@
             <dependency>
                 <groupId>io.dropwizard.metrics</groupId>
                 <artifactId>metrics-core</artifactId>
-                <version>4.2.38</version>
+                <version>4.2.39</version>
             </dependency>
 
             <dependency>
@@ -855,7 +808,7 @@
             <dependency>
                 <groupId>io.minio</groupId>
                 <artifactId>minio</artifactId>
-                <version>9.0.0</version>
+                <version>9.0.3</version>
                 <exclusions>
                     <exclusion>
                         <groupId>com.github.spotbugs</groupId>
@@ -965,18 +918,6 @@
                 <groupId>io.netty</groupId>
                 <artifactId>netty-tcnative-classes</artifactId>
                 <version>${dep.tcnative.version}</version>
-            </dependency>
-
-            <dependency>
-                <groupId>io.projectreactor</groupId>
-                <artifactId>reactor-core</artifactId>
-                <version>3.8.4</version>
-            </dependency>
-
-            <dependency>
-                <groupId>io.projectreactor.netty</groupId>
-                <artifactId>reactor-netty-core</artifactId>
-                <version>1.3.4</version>
             </dependency>
 
             <!-- io.confluent:kafka-avro-serializer uses multiple versions of this transitive dependency -->
@@ -1114,12 +1055,6 @@
 
             <dependency>
                 <groupId>io.trino</groupId>
-                <artifactId>trino-filesystem-alluxio</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-
-            <dependency>
-                <groupId>io.trino</groupId>
                 <artifactId>trino-filesystem-azure</artifactId>
                 <version>${project.version}</version>
             </dependency>
@@ -1151,6 +1086,18 @@
             <dependency>
                 <groupId>io.trino</groupId>
                 <artifactId>trino-geospatial</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>io.trino</groupId>
+                <artifactId>trino-geospatial-epsg</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>io.trino</groupId>
+                <artifactId>trino-geospatial-epsg-generator</artifactId>
                 <version>${project.version}</version>
             </dependency>
 
@@ -1647,7 +1594,7 @@
             <dependency>
                 <groupId>io.trino.tpcds</groupId>
                 <artifactId>tpcds</artifactId>
-                <version>1.4</version>
+                <version>1.7</version>
                 <exclusions>
                     <!-- not used in the runtime -->
                     <exclusion>
@@ -1690,7 +1637,7 @@
             <dependency>
                 <groupId>net.snowflake</groupId>
                 <artifactId>snowflake-jdbc</artifactId>
-                <version>4.0.2</version>
+                <version>4.3.1</version>
             </dependency>
 
             <dependency>
@@ -1884,7 +1831,7 @@
             <dependency>
                 <groupId>org.apache.commons</groupId>
                 <artifactId>commons-configuration2</artifactId>
-                <version>2.13.0</version>
+                <version>2.15.1</version>
             </dependency>
 
             <dependency>
@@ -1903,6 +1850,12 @@
                 <groupId>org.apache.commons</groupId>
                 <artifactId>commons-text</artifactId>
                 <version>1.15.0</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.apache.derby</groupId>
+                <artifactId>derby</artifactId>
+                <version>${dep.derby.version}</version>
             </dependency>
 
             <dependency>
@@ -2035,7 +1988,7 @@
             <dependency>
                 <groupId>org.apache.kafka</groupId>
                 <artifactId>kafka-clients</artifactId>
-                <version>4.2.0</version>
+                <version>4.3.1</version>
                 <exclusions>
                     <exclusion>
                         <groupId>org.lz4</groupId>
@@ -2045,15 +1998,9 @@
             </dependency>
 
             <dependency>
-                <groupId>org.apache.logging.log4j</groupId>
-                <artifactId>log4j-api</artifactId>
-                <version>2.25.3</version>
-            </dependency>
-
-            <dependency>
                 <groupId>org.apache.maven</groupId>
                 <artifactId>maven-model</artifactId>
-                <version>3.9.14</version>
+                <version>3.9.16</version>
             </dependency>
 
             <dependency>
@@ -2146,6 +2093,24 @@
             </dependency>
 
             <dependency>
+                <groupId>org.apache.sis.core</groupId>
+                <artifactId>sis-metadata</artifactId>
+                <version>${dep.sis.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.apache.sis.core</groupId>
+                <artifactId>sis-referencing</artifactId>
+                <version>${dep.sis.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.apache.sis.non-free</groupId>
+                <artifactId>sis-embedded-data</artifactId>
+                <version>${dep.sis.version}</version>
+            </dependency>
+
+            <dependency>
                 <groupId>org.apache.thrift</groupId>
                 <artifactId>libthrift</artifactId>
                 <version>0.24.0</version>
@@ -2218,25 +2183,31 @@
             <dependency>
                 <groupId>org.bouncycastle</groupId>
                 <artifactId>bcprov-jdk18on</artifactId>
-                <version>1.83</version>
+                <version>1.84</version>
             </dependency>
 
             <dependency>
                 <groupId>org.checkerframework</groupId>
                 <artifactId>checker-qual</artifactId>
-                <version>3.54.0</version>
+                <version>4.2.1</version>
             </dependency>
 
             <dependency>
                 <groupId>org.codehaus.plexus</groupId>
                 <artifactId>plexus-utils</artifactId>
-                <version>4.0.2</version>
+                <version>4.0.3</version>
             </dependency>
 
             <dependency>
                 <groupId>org.codehaus.plexus</groupId>
                 <artifactId>plexus-xml</artifactId>
                 <version>4.1.1</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.codehaus.woodstox</groupId>
+                <artifactId>stax2-api</artifactId>
+                <version>4.3.0</version>
             </dependency>
 
             <dependency>
@@ -2249,7 +2220,7 @@
             <dependency>
                 <groupId>org.javassist</groupId>
                 <artifactId>javassist</artifactId>
-                <version>3.30.2-GA</version>
+                <version>3.32.0-GA</version>
             </dependency>
 
             <dependency>
@@ -2279,13 +2250,19 @@
             <dependency>
                 <groupId>org.mariadb.jdbc</groupId>
                 <artifactId>mariadb-java-client</artifactId>
-                <version>3.3.4</version>
+                <version>3.5.9</version>
                 <exclusions>
                     <exclusion>
                         <groupId>com.github.waffle</groupId>
                         <artifactId>waffle-jna</artifactId>
                     </exclusion>
                 </exclusions>
+            </dependency>
+
+            <dependency>
+                <groupId>org.opengis</groupId>
+                <artifactId>geoapi</artifactId>
+                <version>${dep.geoapi.version}</version>
             </dependency>
 
             <dependency>
@@ -2315,7 +2292,7 @@
             <dependency>
                 <groupId>org.roaringbitmap</groupId>
                 <artifactId>RoaringBitmap</artifactId>
-                <version>1.6.13</version>
+                <version>1.6.15</version>
             </dependency>
 
             <dependency>
@@ -2443,8 +2420,7 @@
                     <artifactId>frontend-maven-plugin</artifactId>
                     <version>${dep.frontend-maven-plugin.version}</version>
                     <configuration>
-                        <nodeVersion>${dep.frontend-node.version}</nodeVersion>
-                        <npmVersion>${dep.frontend-npm.version}</npmVersion>
+                        <bunVersion>${dep.frontend-bun.version}</bunVersion>
                     </configuration>
                 </plugin>
                 <plugin>
@@ -2546,6 +2522,41 @@
 
                             <!-- Modernizer emits false-positive warnings even when presence is guaranteed -->
                             <exclusion>java/util/Optional.get:()Ljava/lang/Object;</exclusion>
+
+                            <!-- Trino's code style mandates the static format() over String.formatted(); see .github/DEVELOPMENT.md -->
+                            <exclusion>java/lang/String.format:(Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/String;</exclusion>
+
+                            <!-- Collections.singletonList/emptyList/singleton/emptySet/emptyMap are allowed; the List/Set/Map.of() analogues have different semantics (e.g. null handling) -->
+                            <exclusion>java/util/Collections.singletonList:(Ljava/lang/Object;)Ljava/util/List;</exclusion>
+                            <exclusion>java/util/Collections.emptyList:()Ljava/util/List;</exclusion>
+                            <exclusion>java/util/Collections.singleton:(Ljava/lang/Object;)Ljava/util/Set;</exclusion>
+                            <exclusion>java/util/Collections.emptySet:()Ljava/util/Set;</exclusion>
+                            <exclusion>java/util/Collections.emptyMap:()Ljava/util/Map;</exclusion>
+                            <exclusion>java/util/Collections.singletonMap:(Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/Map;</exclusion>
+
+                            <!-- toUnmodifiableList() rejects nulls whereas Stream.toList() permits them; they are not interchangeable -->
+                            <exclusion>java/util/stream/Collectors.toUnmodifiableList:()Ljava/util/stream/Collector;</exclusion>
+
+                            <!-- Guava's Joiner is more flexible than String.join (skipNulls, useForNull, etc.) -->
+                            <exclusion>com/google/common/base/Joiner.join:(Ljava/lang/Iterable;)Ljava/lang/String;</exclusion>
+
+                            <!-- Lists.newArrayList(...) is more readable than new ArrayList<>(Arrays.asList(...)) -->
+                            <exclusion>com/google/common/collect/Lists.newArrayList:([Ljava/lang/Object;)Ljava/util/ArrayList;</exclusion>
+
+                            <!-- Guava's Strings.repeat is allowed alongside String.repeat(int) -->
+                            <exclusion>com/google/common/base/Strings.repeat:(Ljava/lang/String;I)Ljava/lang/String;</exclusion>
+
+                            <!-- Guava's CharStreams.copy is allowed alongside Reader.transferTo(Writer) -->
+                            <exclusion>com/google/common/io/CharStreams.copy:(Ljava/lang/Readable;Ljava/lang/Appendable;)J</exclusion>
+
+                            <!-- Guava's Files.copy is allowed alongside java.nio.file.Files.copy -->
+                            <exclusion>com/google/common/io/Files.copy:(Ljava/io/File;Ljava/io/File;)V</exclusion>
+
+                            <!-- Guava's Files.createParentDirs is allowed alongside java.nio.file.Files.createDirectories -->
+                            <exclusion>com/google/common/io/Files.createParentDirs:(Ljava/io/File;)V</exclusion>
+
+                            <!-- Collections.sort(List) is allowed alongside List.sort(Comparator.naturalOrder()) -->
+                            <exclusion>java/util/Collections.sort:(Ljava/util/List;)V</exclusion>
                         </exclusions>
                     </configuration>
                 </plugin>
@@ -2624,7 +2635,7 @@
                 <plugin>
                     <groupId>ca.vanzyl.provisio.maven.plugins</groupId>
                     <artifactId>provisio-maven-plugin</artifactId>
-                    <version>1.1.1</version>
+                    <version>1.1.3</version>
                 </plugin>
 
                 <plugin>
@@ -2695,21 +2706,6 @@
                                 </conflictingDependencies>
                                 <resources>
                                     <resource>dependencies.properties</resource>
-                                </resources>
-                            </exception>
-                            <exception>
-                                <conflictingDependencies>
-                                    <dependency>
-                                        <groupId>com.amazonaws</groupId>
-                                        <artifactId>aws-java-sdk-s3</artifactId>
-                                    </dependency>
-                                    <dependency>
-                                        <groupId>software.amazon.awssdk</groupId>
-                                        <artifactId>sdk-core</artifactId>
-                                    </dependency>
-                                </conflictingDependencies>
-                                <resources>
-                                    <resource>mime.types</resource>
                                 </resources>
                             </exception>
                             <exception>
@@ -2859,7 +2855,7 @@
             <plugin>
                 <groupId>io.trino</groupId>
                 <artifactId>trino-maven-plugin</artifactId>
-                <version>17</version>
+                <version>20</version>
                 <extensions>true</extensions>
             </plugin>
 
@@ -2931,14 +2927,13 @@
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-compiler-plugin</artifactId>
-                        <!--suppress MavenModelInspection -->
-                        <configuration combine.children="merge">
+                        <configuration>
                             <!-- forking not required due to JVM flags in .mvn/jvm.config -->
                             <!-- see https://errorprone.info/docs/installation#maven -->
                             <!-- Do not fail on error-prone's warnings even for modules using air.compiler.fail-warnings -->
                             <!-- TODO silence warnings we choose to ignore and raise important warnings to error and then remove <failOnWarning> -->
                             <failOnWarning>false</failOnWarning>
-                            <compilerArgs>
+                            <compilerArgs combine.children="append">
                                 <arg>-XDcompilePolicy=simple</arg>
                                 <arg>--should-stop=ifError=FLOW</arg>
                                 <arg>-Xplugin:ErrorProne @${air.main.basedir}/.mvn/errorprone.config \
@@ -2990,7 +2985,7 @@
                     <plugin>
                         <groupId>io.github.gitflow-incremental-builder</groupId>
                         <artifactId>gitflow-incremental-builder</artifactId>
-                        <version>4.5.6</version>
+                        <version>4.6.0</version>
                         <extensions>true</extensions>
                         <configuration>
                             <compareToMergeBase>true</compareToMergeBase>

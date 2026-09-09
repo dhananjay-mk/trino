@@ -23,6 +23,7 @@ import com.google.common.io.ByteStreams;
 import com.google.common.primitives.Shorts;
 import io.airlift.compress.v3.zstd.ZstdDecompressor;
 import io.airlift.json.JsonCodec;
+import io.airlift.log.Logger;
 import io.trino.hive.thrift.metastore.BinaryColumnStatsData;
 import io.trino.hive.thrift.metastore.BooleanColumnStatsData;
 import io.trino.hive.thrift.metastore.ColumnStatisticsObj;
@@ -165,6 +166,8 @@ import static java.util.Objects.requireNonNull;
 
 public final class ThriftMetastoreUtil
 {
+    private static final Logger log = Logger.get(ThriftMetastoreUtil.class);
+
     private static final JsonCodec<LanguageFunction> LANGUAGE_FUNCTION_CODEC = jsonCodec(LanguageFunction.class);
     private static final String PUBLIC_ROLE_NAME = "public";
     private static final String ADMIN_ROLE_NAME = "admin";
@@ -331,11 +334,11 @@ public final class ThriftMetastoreUtil
         }
 
         return Stream.concat(
-                roles,
-                listApplicableRoles(principal, listRoleGrants)
-                        .map(RoleGrant::getRoleName)
-                        // The admin role must be enabled explicitly. If it is, it was added above.
-                        .filter(Predicate.isEqual(ADMIN_ROLE_NAME).negate()))
+                        roles,
+                        listApplicableRoles(principal, listRoleGrants)
+                                .map(RoleGrant::getRoleName)
+                                // The admin role must be enabled explicitly. If it is, it was added above.
+                                .filter(Predicate.isEqual(ADMIN_ROLE_NAME).negate()))
                 // listApplicableRoles may return role which was already added explicitly above.
                 .distinct();
     }
@@ -435,8 +438,8 @@ public final class ThriftMetastoreUtil
         return serdeInfo.getSerializationLib() != null &&
                 ((table.getParameters().get(AVRO_SCHEMA_URL_KEY) != null ||
                         (serdeInfo.getParameters() != null && serdeInfo.getParameters().get(AVRO_SCHEMA_URL_KEY) != null)) ||
-                 (table.getParameters().get(AVRO_SCHEMA_LITERAL_KEY) != null ||
-                         (serdeInfo.getParameters() != null && serdeInfo.getParameters().get(AVRO_SCHEMA_LITERAL_KEY) != null))) &&
+                        (table.getParameters().get(AVRO_SCHEMA_LITERAL_KEY) != null ||
+                                (serdeInfo.getParameters() != null && serdeInfo.getParameters().get(AVRO_SCHEMA_LITERAL_KEY) != null))) &&
                 serdeInfo.getSerializationLib().equals(AVRO.getSerde());
     }
 
@@ -533,7 +536,7 @@ public final class ThriftMetastoreUtil
      * Both formats store values as seconds since epoch in HMS, which we convert to microseconds
      * for Trino's internal representation.
      */
-    public static HiveColumnStatistics fromMetastoreApiColumnStatistics(ColumnStatisticsObj columnStatistics)
+    public static HiveColumnStatistics fromMetastoreApiColumnStatistics(String databaseName, String tableName, ColumnStatisticsObj columnStatistics)
     {
         if (columnStatistics.getStatsData().isSetLongStats()) {
             LongColumnStatsData longStatsData = columnStatistics.getStatsData().getLongStats();
@@ -623,7 +626,17 @@ public final class ThriftMetastoreUtil
             OptionalLong distinctValuesWithNullCount = timestampStatsData.isSetNumDVs() ? OptionalLong.of(timestampStatsData.getNumDVs()) : OptionalLong.empty();
             return createIntegerColumnStatistics(min, max, nullsCount, distinctValuesWithNullCount);
         }
-        throw new TrinoException(HIVE_INVALID_METADATA, "Invalid column statistics data: " + columnStatistics);
+        log.warn("Unsupported column statistics data in table %s.%s: %s", databaseName, tableName, columnStatistics);
+        return new HiveColumnStatistics(
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                OptionalLong.empty(),
+                OptionalDouble.empty(),
+                OptionalLong.empty(),
+                OptionalLong.empty());
     }
 
     private static Optional<LocalDate> fromMetastoreDate(Date date)
@@ -691,16 +704,11 @@ public final class ThriftMetastoreUtil
     public static PrincipalType fromMetastoreApiPrincipalType(io.trino.hive.thrift.metastore.PrincipalType principalType)
     {
         requireNonNull(principalType, "principalType is null");
-        switch (principalType) {
-            case USER:
-                return USER;
-            case ROLE:
-                return ROLE;
-            case GROUP:
-                // TODO
-                break;
-        }
-        throw new IllegalArgumentException("Unsupported principal type: " + principalType);
+        return switch (principalType) {
+            case USER -> USER;
+            case ROLE -> ROLE;
+            case GROUP -> throw new IllegalArgumentException("Unsupported principal type: " + principalType);
+        };
     }
 
     public static FieldSchema toMetastoreApiFieldSchema(Column column)
@@ -748,6 +756,9 @@ public final class ThriftMetastoreUtil
         sd.setOutputFormat(storage.getStorageFormat().getOutputFormatNullable());
         sd.setSkewedInfoIsSet(storage.isSkewed());
         sd.setParameters(ImmutableMap.of());
+        // Hive uses -1 as the sentinel value for "not bucketed". Leaving the Thrift default (0)
+        // can lead to divergent behavior for unbucketed tables created by Trino.
+        sd.setNumBuckets(-1);
 
         Optional<HiveBucketProperty> bucketProperty = storage.getBucketProperty();
         if (bucketProperty.isPresent()) {
@@ -811,40 +822,18 @@ public final class ThriftMetastoreUtil
     {
         TypeInfo typeInfo = columnType.getTypeInfo();
         checkArgument(typeInfo.getCategory() == PRIMITIVE, "unsupported type: %s", columnType);
-        switch (((PrimitiveTypeInfo) typeInfo).getPrimitiveCategory()) {
-            case BOOLEAN:
-                return createBooleanStatistics(columnName, columnType, statistics);
-            case BYTE:
-            case SHORT:
-            case INT:
-            case LONG:
-                return createLongStatistics(columnName, columnType, statistics);
-            case TIMESTAMP:
-                return createTimestampStatistics(columnName, columnType, statistics);
-            case FLOAT:
-            case DOUBLE:
-                return createDoubleStatistics(columnName, columnType, statistics);
-            case STRING:
-            case VARCHAR:
-            case CHAR:
-                return createStringStatistics(columnName, columnType, statistics);
-            case DATE:
-                return createDateStatistics(columnName, columnType, statistics);
-            case BINARY:
-                return createBinaryStatistics(columnName, columnType, statistics);
-            case DECIMAL:
-                return createDecimalStatistics(columnName, columnType, statistics);
-
-            case TIMESTAMPLOCALTZ:
-            case INTERVAL_YEAR_MONTH:
-            case INTERVAL_DAY_TIME:
-            case VARIANT:
-                // TODO support these, when we add support for these Hive types
-            case VOID:
-            case UNKNOWN:
-                break;
-        }
-        throw new IllegalArgumentException(format("unsupported type: %s", columnType));
+        return switch (((PrimitiveTypeInfo) typeInfo).getPrimitiveCategory()) {
+            case BOOLEAN -> createBooleanStatistics(columnName, columnType, statistics);
+            case BYTE, SHORT, INT, LONG -> createLongStatistics(columnName, columnType, statistics);
+            case TIMESTAMP -> createTimestampStatistics(columnName, columnType, statistics);
+            case FLOAT, DOUBLE -> createDoubleStatistics(columnName, columnType, statistics);
+            case STRING, VARCHAR, CHAR -> createStringStatistics(columnName, columnType, statistics);
+            case DATE -> createDateStatistics(columnName, columnType, statistics);
+            case BINARY -> createBinaryStatistics(columnName, columnType, statistics);
+            case DECIMAL -> createDecimalStatistics(columnName, columnType, statistics);
+            case TIMESTAMPLOCALTZ, INTERVAL_YEAR_MONTH, INTERVAL_DAY_TIME,
+                 VARIANT, VOID, UNKNOWN -> throw new IllegalArgumentException(format("unsupported type: %s", columnType));
+        };
     }
 
     private static ColumnStatisticsObj createBooleanStatistics(String columnName, HiveType columnType, HiveColumnStatistics statistics)
@@ -1050,7 +1039,7 @@ public final class ThriftMetastoreUtil
         return AVRO.getSerde().equals(table.getStorage().getStorageFormat().getSerDeNullable()) &&
                 ((table.getParameters().get(AVRO_SCHEMA_URL_KEY) != null ||
                         (table.getStorage().getSerdeParameters().get(AVRO_SCHEMA_URL_KEY) != null)) ||
-                 (table.getParameters().get(AVRO_SCHEMA_LITERAL_KEY) != null ||
-                         (table.getStorage().getSerdeParameters().get(AVRO_SCHEMA_LITERAL_KEY) != null)));
+                        (table.getParameters().get(AVRO_SCHEMA_LITERAL_KEY) != null ||
+                                (table.getStorage().getSerdeParameters().get(AVRO_SCHEMA_LITERAL_KEY) != null)));
     }
 }

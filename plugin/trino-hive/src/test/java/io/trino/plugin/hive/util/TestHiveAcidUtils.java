@@ -51,7 +51,8 @@ public class TestHiveAcidUtils
             throws Exception
     {
         Configuration conf = new Configuration(false);
-        MockFileSystem fs = new MockFileSystem(conf,
+        MockFileSystem fs = new MockFileSystem(
+                conf,
                 new MockFile("mock:/tbl/part1/000000_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/000000_0" + Utilities.COPY_KEYWORD + "1", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/000000_0" + Utilities.COPY_KEYWORD + "2", 500, new byte[0]),
@@ -85,7 +86,8 @@ public class TestHiveAcidUtils
             throws Exception
     {
         Configuration conf = new Configuration(false);
-        MockFileSystem fs = new MockFileSystem(conf,
+        MockFileSystem fs = new MockFileSystem(
+                conf,
                 new MockFile("mock:/tbl/part1/000000_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/000001_1", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/000002_0", 500, new byte[0]),
@@ -132,7 +134,8 @@ public class TestHiveAcidUtils
             throws Exception
     {
         Configuration conf = new Configuration(false);
-        MockFileSystem fs = new MockFileSystem(conf,
+        MockFileSystem fs = new MockFileSystem(
+                conf,
                 new MockFile("mock:/tbl/part1/_tmp/bucket_0", 0, new byte[0]),
                 new MockFile("mock:/tbl/part1/_tmp/base_5/bucket_0", 0, new byte[0]),
                 new MockFile("mock:/tbl/part1/base_5/bucket_0", 500, new byte[0]),
@@ -168,7 +171,8 @@ public class TestHiveAcidUtils
             throws Exception
     {
         Configuration conf = new Configuration(false);
-        MockFileSystem fs = new MockFileSystem(conf,
+        MockFileSystem fs = new MockFileSystem(
+                conf,
                 new MockFile("mock:/tbl/part1/base_10/bucket_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/base_5/bucket_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/000000_0", 500, new byte[0]),
@@ -187,7 +191,8 @@ public class TestHiveAcidUtils
             throws Exception
     {
         Configuration conf = new Configuration(false);
-        MockFileSystem fs = new MockFileSystem(conf,
+        MockFileSystem fs = new MockFileSystem(
+                conf,
                 new MockFile("mock:/tbl/part1/delta_0000063_63/bucket_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/delta_000062_62/bucket_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/delta_00061_61/bucket_0", 500, new byte[0]),
@@ -215,7 +220,8 @@ public class TestHiveAcidUtils
             throws Exception
     {
         Configuration conf = new Configuration(false);
-        MockFileSystem fs = new MockFileSystem(conf,
+        MockFileSystem fs = new MockFileSystem(
+                conf,
                 new MockFile("mock:/tbl/part1/delta_0000063_63_0/bucket_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/delta_000062_62_0/bucket_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/delta_000062_62_3/bucket_0", 500, new byte[0]),
@@ -251,7 +257,8 @@ public class TestHiveAcidUtils
             throws Exception
     {
         Configuration conf = new Configuration(false);
-        MockFileSystem fs = new MockFileSystem(conf,
+        MockFileSystem fs = new MockFileSystem(
+                conf,
                 new MockFile("mock:/tbl/part1/delta_1_1/bucket_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/delta_2_5/bucket_0", 500, new byte[0]));
         Path part = new MockPath(fs, "mock:/tbl/part1");
@@ -267,7 +274,8 @@ public class TestHiveAcidUtils
             throws Exception
     {
         Configuration conf = new Configuration(false);
-        MockFileSystem fs = new MockFileSystem(conf,
+        MockFileSystem fs = new MockFileSystem(
+                conf,
                 new MockFile("mock:/tbl/part1/delta_1_1/bucket_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/delta_2_5/bucket_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/delta_4_4_1/bucket_0", 500, new byte[0]),
@@ -286,7 +294,8 @@ public class TestHiveAcidUtils
             throws Exception
     {
         Configuration conf = new Configuration(false);
-        MockFileSystem fs = new MockFileSystem(conf,
+        MockFileSystem fs = new MockFileSystem(
+                conf,
                 new MockFile("mock:/tbl/part1/delta_1_1/bucket_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/delta_2_5/bucket_0", 500, new byte[0]));
         Path part = new MockPath(fs, "mock:/tbl/part1");
@@ -301,7 +310,8 @@ public class TestHiveAcidUtils
             throws Exception
     {
         Configuration conf = new Configuration(false);
-        MockFileSystem fs = new MockFileSystem(conf,
+        MockFileSystem fs = new MockFileSystem(
+                conf,
                 new MockFile("mock:/tbl/part1/delta_1_1/bucket_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/delta_2_5/bucket_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/delta_2_5/bucket_0" + AcidUtils.DELTA_SIDE_FILE_SUFFIX, 500, new byte[0]),
@@ -318,7 +328,8 @@ public class TestHiveAcidUtils
             throws Exception
     {
         Configuration conf = new Configuration(false);
-        MockFileSystem fs = new MockFileSystem(conf,
+        MockFileSystem fs = new MockFileSystem(
+                conf,
                 new MockFile("mock:/tbl/part1/base_5/bucket_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/base_10/bucket_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/base_49/bucket_0", 500, new byte[0]),
@@ -356,7 +367,8 @@ public class TestHiveAcidUtils
             throws Exception
     {
         Configuration conf = new Configuration(false);
-        MockFileSystem fs = new MockFileSystem(conf,
+        MockFileSystem fs = new MockFileSystem(
+                conf,
                 new MockFile("mock:/tbl/part1/delta_0000063_63/bucket_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/delta_000062_62/bucket_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/delta_00061_61/bucket_0", 500, new byte[0]),
@@ -392,7 +404,8 @@ public class TestHiveAcidUtils
         // This test checks that if we have a minor compacted delta for the txn range [40,60]
         // then it will make any delete delta in that range as obsolete.
         Configuration conf = new Configuration(false);
-        MockFileSystem fs = new MockFileSystem(conf,
+        MockFileSystem fs = new MockFileSystem(
+                conf,
                 new MockFile("mock:/tbl/part1/delta_40_60/bucket_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/delete_delta_50_50/bucket_0", 500, new byte[0]));
         Path part = new MockPath(fs, "mock:/tbl/part1");
@@ -412,7 +425,8 @@ public class TestHiveAcidUtils
         // This tests checks that appropriate delta and delete_deltas are included when minor
         // compactions specifies a valid open txn range.
         Configuration conf = new Configuration(false);
-        MockFileSystem fs = new MockFileSystem(conf,
+        MockFileSystem fs = new MockFileSystem(
+                conf,
                 new MockFile("mock:/tbl/part1/delta_1_1/bucket_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/delete_delta_2_2/bucket_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/delta_2_5/bucket_0", 500, new byte[0]),
@@ -433,7 +447,8 @@ public class TestHiveAcidUtils
             throws Exception
     {
         Configuration conf = new Configuration(false);
-        MockFileSystem fs = new MockFileSystem(conf,
+        MockFileSystem fs = new MockFileSystem(
+                conf,
                 new MockFile("mock:/tbl/part1/delta_1_1/bucket_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/delta_2_5/bucket_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/delete_delta_2_5/bucket_0", 500, new byte[0]),
@@ -466,7 +481,8 @@ public class TestHiveAcidUtils
             throws IOException
     {
         Configuration conf = new Configuration(false);
-        MockFileSystem fs = new MockFileSystem(conf,
+        MockFileSystem fs = new MockFileSystem(
+                conf,
                 new MockFile("mock:/tbl/part1/base_1/bucket_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/base_1/base_1/bucket_0", 500, new byte[0]),
                 new MockFile("mock:/tbl/part1/delta_025_025/bucket_0", 500, new byte[0]),

@@ -18,7 +18,6 @@ import org.apache.parquet.bytes.BytesInput;
 import org.apache.parquet.column.Encoding;
 import org.apache.parquet.column.page.DictionaryPage;
 import org.apache.parquet.column.statistics.Statistics;
-import org.apache.parquet.column.values.ValuesWriter;
 import org.apache.parquet.schema.PrimitiveType;
 
 import static java.util.Objects.requireNonNull;
@@ -56,6 +55,15 @@ public abstract class PrimitiveValueWriter
     public long getBufferedSize()
     {
         return valuesWriter.getBufferedSize();
+    }
+
+    public long getEstimatedBufferedSize()
+    {
+        return switch (valuesWriter) {
+            case DictionaryFallbackValuesWriter dictionaryFallbackValuesWriter -> dictionaryFallbackValuesWriter.getEstimatedBufferedSize();
+            case BloomFilterValuesWriter bloomFilterValuesWriter -> bloomFilterValuesWriter.getEstimatedBufferedSize();
+            default -> valuesWriter.getBufferedSize();
+        };
     }
 
     @Override

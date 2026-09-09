@@ -22,7 +22,6 @@ import com.google.common.primitives.Shorts;
 import com.google.common.primitives.SignedBytes;
 import io.airlift.slice.Slice;
 import io.airlift.slice.SliceOutput;
-import io.airlift.slice.Slices;
 import io.trino.spi.TrinoException;
 import io.trino.spi.block.ArrayBlockBuilder;
 import io.trino.spi.block.Block;
@@ -43,6 +42,7 @@ import io.trino.spi.type.Int128;
 import io.trino.spi.type.IntegerType;
 import io.trino.spi.type.LongTimestamp;
 import io.trino.spi.type.MapType;
+import io.trino.spi.type.NumberType;
 import io.trino.spi.type.RealType;
 import io.trino.spi.type.RowType;
 import io.trino.spi.type.RowType.Field;
@@ -50,6 +50,7 @@ import io.trino.spi.type.SmallintType;
 import io.trino.spi.type.StandardTypes;
 import io.trino.spi.type.TimestampType;
 import io.trino.spi.type.TinyintType;
+import io.trino.spi.type.TrinoNumber;
 import io.trino.spi.type.Type;
 import io.trino.spi.type.VarcharType;
 import io.trino.type.BigintOperators;
@@ -58,6 +59,7 @@ import io.trino.type.DoubleOperators;
 import io.trino.type.JsonType;
 import io.trino.type.UnknownType;
 import io.trino.type.VarcharOperators;
+import jakarta.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -81,14 +83,16 @@ import static com.fasterxml.jackson.core.JsonToken.FIELD_NAME;
 import static com.fasterxml.jackson.core.JsonToken.START_ARRAY;
 import static com.fasterxml.jackson.core.JsonToken.START_OBJECT;
 import static com.google.common.base.Verify.verify;
+import static io.airlift.slice.Slices.utf8Slice;
 import static io.trino.plugin.base.util.JsonUtils.jsonFactoryBuilder;
-import static io.trino.spi.StandardErrorCode.INVALID_CAST_ARGUMENT;
 import static io.trino.spi.StandardErrorCode.INVALID_FUNCTION_ARGUMENT;
+import static io.trino.spi.StandardErrorCode.NUMERIC_VALUE_OUT_OF_RANGE;
 import static io.trino.spi.type.BigintType.BIGINT;
 import static io.trino.spi.type.BooleanType.BOOLEAN;
 import static io.trino.spi.type.DateType.DATE;
 import static io.trino.spi.type.DoubleType.DOUBLE;
 import static io.trino.spi.type.IntegerType.INTEGER;
+import static io.trino.spi.type.NumberType.NUMBER;
 import static io.trino.spi.type.RealType.REAL;
 import static io.trino.spi.type.SmallintType.SMALLINT;
 import static io.trino.spi.type.TinyintType.TINYINT;
@@ -180,6 +184,7 @@ public final class JsonUtil
                 type instanceof RealType ||
                 type instanceof DoubleType ||
                 type instanceof DecimalType ||
+                type instanceof NumberType ||
                 type instanceof VarcharType ||
                 type instanceof JsonType ||
                 type instanceof TimestampType ||
@@ -210,6 +215,7 @@ public final class JsonUtil
                 type instanceof RealType ||
                 type instanceof DoubleType ||
                 type instanceof DecimalType ||
+                type instanceof NumberType ||
                 type instanceof VarcharType ||
                 type instanceof JsonType) {
             return true;
@@ -247,7 +253,7 @@ public final class JsonUtil
         static ObjectKeyProvider createObjectKeyProvider(Type type)
         {
             if (type.equals(UNKNOWN)) {
-                return (block, position) -> null;
+                return (_, _) -> null;
             }
             if (type.equals(BOOLEAN)) {
                 return (block, position) -> BOOLEAN.getBoolean(block, position) ? "true" : "false";
@@ -315,6 +321,9 @@ public final class JsonUtil
                     return new ShortDecimalJsonGeneratorWriter(decimalType);
                 }
                 return new LongDecimalJsonGeneratorWriter(decimalType);
+            }
+            if (type instanceof NumberType) {
+                return new NumberJsonGeneratorWriter();
             }
             if (type instanceof VarcharType) {
                 return new VarcharJsonGeneratorWriter(type);
@@ -484,6 +493,27 @@ public final class JsonUtil
                         ((Int128) type.getObject(block, position)).toBigInteger(),
                         type.getScale());
                 jsonGenerator.writeNumber(value);
+            }
+        }
+    }
+
+    private static class NumberJsonGeneratorWriter
+            implements JsonGeneratorWriter
+    {
+        @Override
+        public void writeJsonValue(JsonGenerator jsonGenerator, Block block, int position)
+                throws IOException
+        {
+            if (block.isNull(position)) {
+                jsonGenerator.writeNull();
+            }
+            else {
+                TrinoNumber value = (TrinoNumber) NUMBER.getObject(block, position);
+                switch (value.toBigDecimal()) {
+                    case TrinoNumber.NotANumber() -> jsonGenerator.writeString("NaN");
+                    case TrinoNumber.Infinity(boolean negative) -> jsonGenerator.writeString(negative ? "-Infinity" : "+Infinity");
+                    case TrinoNumber.BigDecimalValue(BigDecimal bigDecimal) -> jsonGenerator.writeNumber(bigDecimal);
+                }
             }
         }
     }
@@ -696,12 +726,12 @@ public final class JsonUtil
     {
         return switch (parser.currentToken()) {
             case VALUE_NULL -> null;
-            case VALUE_STRING, FIELD_NAME -> Slices.utf8Slice(parser.getText());
+            case VALUE_STRING, FIELD_NAME -> utf8Slice(parser.getText());
             // Avoidance of loss of precision does not seem to be possible here because of Jackson implementation.
             case VALUE_NUMBER_FLOAT -> DoubleOperators.castToVarchar(UNBOUNDED_LENGTH, parser.getDoubleValue());
             // An alternative is calling getLongValue and then BigintOperators.castToVarchar.
             // It doesn't work as well because it can result in overflow and underflow exceptions for large integral numbers.
-            case VALUE_NUMBER_INT -> Slices.utf8Slice(parser.getText());
+            case VALUE_NUMBER_INT -> utf8Slice(parser.getText());
             case VALUE_TRUE -> BooleanOperators.castToVarchar(UNBOUNDED_LENGTH, true);
             case VALUE_FALSE -> BooleanOperators.castToVarchar(UNBOUNDED_LENGTH, false);
             default -> throw new JsonCastException(format("Unexpected token when cast to %s: %s", StandardTypes.VARCHAR, parser.getText()));
@@ -713,8 +743,8 @@ public final class JsonUtil
     {
         return switch (parser.currentToken()) {
             case VALUE_NULL -> null;
-            case VALUE_STRING, FIELD_NAME -> VarcharOperators.castToBigint(Slices.utf8Slice(parser.getText()));
-            case VALUE_NUMBER_FLOAT -> DoubleOperators.castToLong(parser.getDoubleValue());
+            case VALUE_STRING, FIELD_NAME -> VarcharOperators.castToBigint(utf8Slice(parser.getText()));
+            case VALUE_NUMBER_FLOAT -> DoubleOperators.castToBigint(parser.getDoubleValue());
             case VALUE_NUMBER_INT -> parser.getLongValue();
             case VALUE_TRUE -> BooleanOperators.castToBigint(true);
             case VALUE_FALSE -> BooleanOperators.castToBigint(false);
@@ -727,7 +757,7 @@ public final class JsonUtil
     {
         return switch (parser.currentToken()) {
             case VALUE_NULL -> null;
-            case VALUE_STRING, FIELD_NAME -> VarcharOperators.castToInteger(Slices.utf8Slice(parser.getText()));
+            case VALUE_STRING, FIELD_NAME -> VarcharOperators.castToInteger(utf8Slice(parser.getText()));
             case VALUE_NUMBER_FLOAT -> DoubleOperators.castToInteger(parser.getDoubleValue());
             case VALUE_NUMBER_INT -> (long) toIntExact(parser.getLongValue());
             case VALUE_TRUE -> BooleanOperators.castToInteger(true);
@@ -741,7 +771,7 @@ public final class JsonUtil
     {
         return switch (parser.currentToken()) {
             case VALUE_NULL -> null;
-            case VALUE_STRING, FIELD_NAME -> VarcharOperators.castToSmallint(Slices.utf8Slice(parser.getText()));
+            case VALUE_STRING, FIELD_NAME -> VarcharOperators.castToSmallint(utf8Slice(parser.getText()));
             case VALUE_NUMBER_FLOAT -> DoubleOperators.castToSmallint(parser.getDoubleValue());
             case VALUE_NUMBER_INT -> (long) Shorts.checkedCast(parser.getLongValue());
             case VALUE_TRUE -> BooleanOperators.castToSmallint(true);
@@ -755,7 +785,7 @@ public final class JsonUtil
     {
         return switch (parser.currentToken()) {
             case VALUE_NULL -> null;
-            case VALUE_STRING, FIELD_NAME -> VarcharOperators.castToTinyint(Slices.utf8Slice(parser.getText()));
+            case VALUE_STRING, FIELD_NAME -> VarcharOperators.castToTinyint(utf8Slice(parser.getText()));
             case VALUE_NUMBER_FLOAT -> DoubleOperators.castToTinyint(parser.getDoubleValue());
             case VALUE_NUMBER_INT -> (long) SignedBytes.checkedCast(parser.getLongValue());
             case VALUE_TRUE -> BooleanOperators.castToTinyint(true);
@@ -769,7 +799,7 @@ public final class JsonUtil
     {
         return switch (parser.currentToken()) {
             case VALUE_NULL -> null;
-            case VALUE_STRING, FIELD_NAME -> VarcharOperators.castToDouble(Slices.utf8Slice(parser.getText()));
+            case VALUE_STRING, FIELD_NAME -> VarcharOperators.castToDouble(utf8Slice(parser.getText()));
             case VALUE_NUMBER_FLOAT -> parser.getDoubleValue();
             // An alternative is calling getLongValue and then BigintOperators.castToDouble.
             // It doesn't work as well because it can result in overflow and underflow exceptions for large integral numbers.
@@ -785,7 +815,7 @@ public final class JsonUtil
     {
         return switch (parser.currentToken()) {
             case VALUE_NULL -> null;
-            case VALUE_STRING, FIELD_NAME -> VarcharOperators.castToFloat(Slices.utf8Slice(parser.getText()));
+            case VALUE_STRING, FIELD_NAME -> VarcharOperators.castToReal(utf8Slice(parser.getText()));
             case VALUE_NUMBER_FLOAT -> (long) floatToRawIntBits(parser.getFloatValue());
             // An alternative is calling getLongValue and then BigintOperators.castToReal.
             // It doesn't work as well because it can result in overflow and underflow exceptions for large integral numbers.
@@ -796,12 +826,26 @@ public final class JsonUtil
         };
     }
 
+    @Nullable
+    public static TrinoNumber currentTokenAsNumber(JsonParser parser)
+            throws IOException
+    {
+        return switch (parser.currentToken()) {
+            case VALUE_NULL -> null;
+            case VALUE_STRING, FIELD_NAME -> VarcharOperators.castToNumber(utf8Slice(parser.getText()));
+            case VALUE_NUMBER_INT, VALUE_NUMBER_FLOAT -> TrinoNumber.from(parser.getDecimalValue());
+            case VALUE_TRUE -> TrinoNumber.from(BigDecimal.ONE);
+            case VALUE_FALSE -> TrinoNumber.from(BigDecimal.ZERO);
+            default -> throw new JsonCastException(format("Unexpected token when cast to %s: %s", StandardTypes.NUMBER, parser.getText()));
+        };
+    }
+
     public static Boolean currentTokenAsBoolean(JsonParser parser)
             throws IOException
     {
         return switch (parser.currentToken()) {
             case VALUE_NULL -> null;
-            case VALUE_STRING, FIELD_NAME -> VarcharOperators.castToBoolean(Slices.utf8Slice(parser.getText()));
+            case VALUE_STRING, FIELD_NAME -> VarcharOperators.castToBoolean(utf8Slice(parser.getText()));
             case VALUE_NUMBER_FLOAT -> DoubleOperators.castToBoolean(parser.getDoubleValue());
             case VALUE_NUMBER_INT -> BigintOperators.castToBoolean(parser.getLongValue());
             case VALUE_TRUE -> true;
@@ -836,31 +880,24 @@ public final class JsonUtil
     {
         BigDecimal result;
         switch (parser.getCurrentToken()) {
-            case VALUE_NULL:
+            case VALUE_NULL -> {
                 return null;
-            case VALUE_STRING:
-            case FIELD_NAME:
+            }
+            case VALUE_STRING, FIELD_NAME -> {
                 result = new BigDecimal(parser.getText());
                 result = result.setScale(scale, HALF_UP);
-                break;
-            case VALUE_NUMBER_FLOAT:
-            case VALUE_NUMBER_INT:
+            }
+            case VALUE_NUMBER_FLOAT, VALUE_NUMBER_INT -> {
                 result = parser.getDecimalValue();
                 result = result.setScale(scale, HALF_UP);
-                break;
-            case VALUE_TRUE:
-                result = BigDecimal.ONE.setScale(scale, HALF_UP);
-                break;
-            case VALUE_FALSE:
-                result = BigDecimal.ZERO.setScale(scale, HALF_UP);
-                break;
-            default:
-                throw new JsonCastException(format("Unexpected token when cast to DECIMAL(%s,%s): %s", precision, scale, parser.getText()));
+            }
+            case VALUE_TRUE -> result = BigDecimal.ONE.setScale(scale, HALF_UP);
+            case VALUE_FALSE -> result = BigDecimal.ZERO.setScale(scale, HALF_UP);
+            default -> throw new JsonCastException(format("Unexpected token when cast to DECIMAL(%s,%s): %s", precision, scale, parser.getText()));
         }
 
         if (result.precision() > precision) {
-            // TODO: Should we use NUMERIC_VALUE_OUT_OF_RANGE instead?
-            throw new TrinoException(INVALID_CAST_ARGUMENT, format("Cannot cast input json to DECIMAL(%s,%s)", precision, scale));
+            throw new TrinoException(NUMERIC_VALUE_OUT_OF_RANGE, format("Cannot cast input json to DECIMAL(%s,%s)", precision, scale));
         }
         return result;
     }
@@ -901,13 +938,16 @@ public final class JsonUtil
 
                 return new LongDecimalBlockBuilderAppender(decimalType);
             }
+            if (type instanceof NumberType) {
+                return new NumberBlockBuilderAppender();
+            }
             if (type instanceof VarcharType) {
                 return new VarcharBlockBuilderAppender(type);
             }
             if (type instanceof JsonType) {
                 return (parser, blockBuilder) -> {
                     String json = JSON_MAPPED_UNORDERED.writeValueAsString(parser.readValueAsTree());
-                    JSON.writeSlice(blockBuilder, Slices.utf8Slice(json));
+                    JSON.writeSlice(blockBuilder, utf8Slice(json));
                 };
             }
             if (type instanceof ArrayType arrayType) {
@@ -1096,6 +1136,24 @@ public final class JsonUtil
             }
             else {
                 type.writeObject(blockBuilder, result);
+            }
+        }
+    }
+
+    private static class NumberBlockBuilderAppender
+            implements BlockBuilderAppender
+    {
+        @Override
+        public void append(JsonParser parser, BlockBuilder blockBuilder)
+                throws IOException
+        {
+            TrinoNumber result = currentTokenAsNumber(parser);
+
+            if (result == null) {
+                blockBuilder.appendNull();
+            }
+            else {
+                NUMBER.writeObject(blockBuilder, result);
             }
         }
     }

@@ -38,6 +38,7 @@ import io.trino.plugin.iceberg.IcebergMetadata;
 import io.trino.plugin.iceberg.IcebergPartitioningHandle;
 import io.trino.plugin.iceberg.IcebergTableHandle;
 import io.trino.plugin.iceberg.IcebergWritableTableHandle;
+import io.trino.plugin.iceberg.functions.tablechanges.TableChangesFunctionHandle;
 import io.trino.plugin.iceberg.procedure.IcebergTableExecuteHandle;
 import io.trino.spi.RefreshType;
 import io.trino.spi.connector.AggregateFunction;
@@ -90,6 +91,7 @@ import io.trino.spi.expression.ConnectorExpression;
 import io.trino.spi.expression.Constant;
 import io.trino.spi.function.LanguageFunction;
 import io.trino.spi.function.SchemaFunctionName;
+import io.trino.spi.function.table.ConnectorTableFunctionHandle;
 import io.trino.spi.metrics.Metric;
 import io.trino.spi.metrics.Metrics;
 import io.trino.spi.security.GrantInfo;
@@ -115,6 +117,7 @@ import static io.trino.plugin.hive.util.HiveUtil.isHudiTable;
 import static io.trino.plugin.hive.util.HiveUtil.isIcebergTable;
 import static io.trino.plugin.iceberg.IcebergTableName.isIcebergTableName;
 import static io.trino.plugin.iceberg.IcebergTableName.isMaterializedViewStorage;
+import static io.trino.plugin.iceberg.IcebergTableName.isSystemView;
 import static io.trino.plugin.lakehouse.LakehouseTableProperties.getTableType;
 import static java.util.Objects.requireNonNull;
 
@@ -203,9 +206,9 @@ public class LakehouseMetadata
     }
 
     @Override
-    public void finishTableExecute(ConnectorSession session, ConnectorTableExecuteHandle tableExecuteHandle, Collection<Slice> fragments, List<Object> tableExecuteState)
+    public Map<String, Long> finishTableExecute(ConnectorSession session, ConnectorTableExecuteHandle tableExecuteHandle, Collection<Slice> fragments, List<Object> tableExecuteState)
     {
-        forHandle(tableExecuteHandle).finishTableExecute(session, tableExecuteHandle, fragments, tableExecuteState);
+        return forHandle(tableExecuteHandle).finishTableExecute(session, tableExecuteHandle, fragments, tableExecuteState);
     }
 
     @Override
@@ -595,13 +598,13 @@ public class LakehouseMetadata
     }
 
     @Override
-    public Optional<ConnectorOutputMetadata> finishRefreshMaterializedView(ConnectorSession session, ConnectorTableHandle tableHandle, ConnectorInsertTableHandle insertHandle, Collection<Slice> fragments, Collection<ComputedStatistics> computedStatistics, List<ConnectorTableHandle> sourceTableHandles, boolean hasForeignSourceTables, boolean hasSourceTableFunctions)
+    public Optional<ConnectorOutputMetadata> finishRefreshMaterializedView(ConnectorSession session, ConnectorTableHandle tableHandle, ConnectorInsertTableHandle insertHandle, Collection<Slice> fragments, Collection<ComputedStatistics> computedStatistics, List<ConnectorTableHandle> sourceTableHandles, boolean hasForeignSourceTables, boolean hasSourceTableFunctions, boolean hasNonDeterministicFunctions)
     {
         List<ConnectorTableHandle> icebergSourceHandles = sourceTableHandles.stream()
                 .filter(IcebergTableHandle.class::isInstance)
                 .toList();
         hasForeignSourceTables |= icebergSourceHandles.size() < sourceTableHandles.size();
-        return icebergMetadata.finishRefreshMaterializedView(session, tableHandle, insertHandle, fragments, computedStatistics, icebergSourceHandles, hasForeignSourceTables, hasSourceTableFunctions);
+        return icebergMetadata.finishRefreshMaterializedView(session, tableHandle, insertHandle, fragments, computedStatistics, icebergSourceHandles, hasForeignSourceTables, hasSourceTableFunctions, hasNonDeterministicFunctions);
     }
 
     @Override
@@ -679,12 +682,20 @@ public class LakehouseMetadata
     @Override
     public Optional<ConnectorViewDefinition> getView(ConnectorSession session, SchemaTableName viewName)
     {
+        if (isIcebergTableName(viewName.getTableName()) && isSystemView(viewName.getTableName())) {
+            return icebergMetadata.getView(session, viewName);
+        }
+
         return hiveMetadata.getView(session, viewName);
     }
 
     @Override
     public boolean isView(ConnectorSession session, SchemaTableName viewName)
     {
+        if (isIcebergTableName(viewName.getTableName()) && isSystemView(viewName.getTableName())) {
+            return icebergMetadata.isView(session, viewName);
+        }
+
         return hiveMetadata.isView(session, viewName);
     }
 
@@ -977,6 +988,12 @@ public class LakehouseMetadata
     }
 
     @Override
+    public Optional<ConnectorTableCredentials> getTableCredentials(ConnectorSession session, ConnectorTableFunctionHandle tableFunctionHandle)
+    {
+        return forHandle(tableFunctionHandle).getTableCredentials(session, tableFunctionHandle);
+    }
+
+    @Override
     public boolean allowSplittingReadIntoMultipleSubQueries(ConnectorSession session, ConnectorTableHandle tableHandle)
     {
         return forHandle(tableHandle).allowSplittingReadIntoMultipleSubQueries(session, tableHandle);
@@ -1003,6 +1020,14 @@ public class LakehouseMetadata
             case HudiTableHandle _ -> hudiMetadata;
             default -> throw new IllegalArgumentException("Unsupported table handle: " + handle.getClass().getName());
         };
+    }
+
+    private ConnectorMetadata forHandle(ConnectorTableFunctionHandle tableFunctionHandle)
+    {
+        if (tableFunctionHandle instanceof TableChangesFunctionHandle _) {
+            return icebergMetadata;
+        }
+        throw new IllegalArgumentException("Unsupported ConnectorTableFunctionHandle type: " + tableFunctionHandle.getClass().getName());
     }
 
     private ConnectorMetadata forHandle(ConnectorWritableTableHandle handle)

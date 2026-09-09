@@ -66,7 +66,6 @@ import io.trino.spi.connector.TopNApplicationResult;
 import io.trino.spi.connector.WriterScalingOptions;
 import io.trino.spi.expression.ConnectorExpression;
 import io.trino.spi.expression.Constant;
-import io.trino.spi.function.AggregationFunctionMetadata;
 import io.trino.spi.function.BoundSignature;
 import io.trino.spi.function.CatalogSchemaFunctionName;
 import io.trino.spi.function.FunctionDependencyDeclaration;
@@ -76,6 +75,7 @@ import io.trino.spi.function.FunctionNullability;
 import io.trino.spi.function.LanguageFunction;
 import io.trino.spi.function.OperatorType;
 import io.trino.spi.function.Signature;
+import io.trino.spi.function.table.ConnectorTableFunctionHandle;
 import io.trino.spi.metrics.Metrics;
 import io.trino.spi.predicate.TupleDomain;
 import io.trino.spi.security.FunctionAuthorization;
@@ -90,7 +90,7 @@ import io.trino.spi.statistics.ComputedStatistics;
 import io.trino.spi.statistics.TableStatistics;
 import io.trino.spi.statistics.TableStatisticsMetadata;
 import io.trino.spi.type.Type;
-import io.trino.sql.analyzer.TypeSignatureProvider;
+import io.trino.sql.analyzer.TypeDescriptorProvider;
 import io.trino.sql.planner.PartitioningHandle;
 
 import java.util.Collection;
@@ -176,7 +176,7 @@ public abstract class AbstractMockMetadata
     }
 
     @Override
-    public void finishTableExecute(Session session, TableExecuteHandle handle, Collection<Slice> fragments, List<Object> tableExecuteState)
+    public Map<String, Long> finishTableExecute(Session session, TableExecuteHandle handle, Collection<Slice> fragments, List<Object> tableExecuteState)
     {
         throw new UnsupportedOperationException();
     }
@@ -537,7 +537,8 @@ public abstract class AbstractMockMetadata
             Collection<Slice> fragments,
             Collection<ComputedStatistics> computedStatistics,
             List<TableHandle> sourceTableHandles,
-            List<String> sourceTableFunctions)
+            List<String> sourceTableFunctions,
+            boolean hasNonDeterministicFunctions)
     {
         throw new UnsupportedOperationException();
     }
@@ -892,7 +893,7 @@ public abstract class AbstractMockMetadata
     }
 
     @Override
-    public ResolvedFunction resolveBuiltinFunction(String name, List<TypeSignatureProvider> parameterTypes)
+    public ResolvedFunction resolveBuiltinFunction(String name, List<TypeDescriptorProvider> parameterTypes)
     {
         if (name.equals("rand") && parameterTypes.isEmpty()) {
             BoundSignature boundSignature = new BoundSignature(builtinFunctionName(name), DOUBLE, ImmutableList.of());
@@ -942,12 +943,12 @@ public abstract class AbstractMockMetadata
                         .signature(Signature.builder().returnType(DOUBLE).build())
                         .alias(RAND_NAME.functionName())
                         .nondeterministic()
-                        .noDescription()
+                        .description("")
                         .build()));
     }
 
     @Override
-    public AggregationFunctionMetadata getAggregationFunctionMetadata(Session session, ResolvedFunction resolvedFunction)
+    public ResolvedAggregationFunctionMetadata getAggregationFunctionMetadata(Session session, ResolvedFunction resolvedFunction)
     {
         throw new UnsupportedOperationException();
     }
@@ -1112,6 +1113,12 @@ public abstract class AbstractMockMetadata
     }
 
     @Override
+    public RedirectionAwareView getRedirectionAwareView(Session session, QualifiedObjectName viewName)
+    {
+        return RedirectionAwareView.noRedirection(getView(session, viewName));
+    }
+
+    @Override
     public Optional<TableHandle> getTableHandle(Session session, QualifiedObjectName table, Optional<TableVersion> startVersion, Optional<TableVersion> endVersion)
     {
         throw new UnsupportedOperationException();
@@ -1173,6 +1180,12 @@ public abstract class AbstractMockMetadata
 
     @Override
     public Optional<ConnectorTableCredentials> getTableCredentials(Session session, CatalogHandle catalogHandle, ConnectorWritableTableHandle tableHandle)
+    {
+        return Optional.empty();
+    }
+
+    @Override
+    public Optional<ConnectorTableCredentials> getTableCredentials(Session session, CatalogHandle catalogHandle, ConnectorTableFunctionHandle tableFunctionHandle)
     {
         return Optional.empty();
     }

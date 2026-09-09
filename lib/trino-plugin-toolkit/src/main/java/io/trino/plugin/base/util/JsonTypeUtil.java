@@ -36,6 +36,7 @@ import java.util.List;
 import java.util.StringJoiner;
 
 import static com.fasterxml.jackson.core.JsonFactory.Feature.CANONICALIZE_FIELD_NAMES;
+import static com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS;
 import static com.fasterxml.jackson.databind.SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS;
 import static com.google.common.base.Preconditions.checkState;
 import static io.trino.plugin.base.util.JsonUtils.jsonFactoryBuilder;
@@ -52,11 +53,11 @@ public final class JsonTypeUtil
     private static final JsonMapper SORTED_MAPPER = new JsonMapperProvider().get()
             .rebuild()
             .configure(ORDER_MAP_ENTRIES_BY_KEYS, true)
+            .configure(USE_BIG_DECIMAL_FOR_FLOATS, true)
             .build();
 
     private JsonTypeUtil() {}
 
-    // TODO: this should be available from the engine
     public static Slice jsonParse(Slice slice)
     {
         // cast(json_parse(x) AS t)` will be optimized into `$internal$json_string_to_array/map/row_cast` in ExpressionOptimizer

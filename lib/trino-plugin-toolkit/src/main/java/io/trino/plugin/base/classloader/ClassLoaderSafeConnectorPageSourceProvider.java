@@ -24,6 +24,7 @@ import io.trino.spi.connector.ConnectorTableCredentials;
 import io.trino.spi.connector.ConnectorTableHandle;
 import io.trino.spi.connector.ConnectorTransactionHandle;
 import io.trino.spi.connector.DynamicFilter;
+import io.trino.spi.connector.MemoryContext;
 
 import java.util.List;
 import java.util.Optional;
@@ -44,14 +45,6 @@ public class ClassLoaderSafeConnectorPageSourceProvider
     }
 
     @Override
-    public ConnectorPageSource createPageSource(ConnectorTransactionHandle transaction, ConnectorSession session, ConnectorSplit split, ConnectorTableHandle table, List<ColumnHandle> columns, DynamicFilter dynamicFilter)
-    {
-        try (ThreadContextClassLoader _ = new ThreadContextClassLoader(classLoader)) {
-            return delegate.createPageSource(transaction, session, split, table, columns, dynamicFilter);
-        }
-    }
-
-    @Override
     public ConnectorPageSource createPageSource(
             ConnectorTransactionHandle transaction,
             ConnectorSession session,
@@ -63,6 +56,22 @@ public class ClassLoaderSafeConnectorPageSourceProvider
     {
         try (ThreadContextClassLoader _ = new ThreadContextClassLoader(classLoader)) {
             return delegate.createPageSource(transaction, session, split, table, tableCredentials, columns, dynamicFilter);
+        }
+    }
+
+    @Override
+    public ConnectorPageSource createPageSource(
+            ConnectorTransactionHandle transaction,
+            ConnectorSession session,
+            ConnectorSplit split,
+            ConnectorTableHandle table,
+            Optional<ConnectorTableCredentials> tableCredentials,
+            List<ColumnHandle> columns,
+            DynamicFilter dynamicFilter,
+            MemoryContext memoryContext)
+    {
+        try (ThreadContextClassLoader _ = new ThreadContextClassLoader(classLoader)) {
+            return delegate.createPageSource(transaction, session, split, table, tableCredentials, columns, dynamicFilter, memoryContext);
         }
     }
 

@@ -13,12 +13,14 @@
  */
 package io.trino.client;
 
+import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.google.common.collect.ImmutableList;
 
 import java.io.IOException;
+import java.io.StringWriter;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -27,6 +29,8 @@ import java.util.Map;
 import java.util.Optional;
 
 import static com.fasterxml.jackson.core.JsonToken.END_ARRAY;
+import static com.fasterxml.jackson.core.JsonToken.END_OBJECT;
+import static com.fasterxml.jackson.core.JsonToken.FIELD_NAME;
 import static com.fasterxml.jackson.core.JsonToken.START_OBJECT;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Verify.verify;
@@ -64,6 +68,8 @@ import static io.trino.client.ClientStandardTypes.TINYINT;
 import static io.trino.client.ClientStandardTypes.UUID;
 import static io.trino.client.ClientStandardTypes.VARBINARY;
 import static io.trino.client.ClientStandardTypes.VARCHAR;
+import static io.trino.client.ClientStandardTypes.VARIANT;
+import static io.trino.client.JsonIterators.createJsonFactory;
 import static java.lang.String.format;
 import static java.util.Collections.unmodifiableList;
 import static java.util.Collections.unmodifiableMap;
@@ -71,6 +77,8 @@ import static java.util.Objects.requireNonNull;
 
 public final class JsonDecodingUtils
 {
+    static final JsonMapper JSON_MAPPER = new JsonMapper(createJsonFactory());
+
     private JsonDecodingUtils() {}
 
     private static final BigIntegerDecoder BIG_INTEGER_DECODER = new BigIntegerDecoder();
@@ -81,15 +89,17 @@ public final class JsonDecodingUtils
     private static final RealDecoder REAL_DECODER = new RealDecoder();
     private static final BooleanDecoder BOOLEAN_DECODER = new BooleanDecoder();
     private static final StringDecoder STRING_DECODER = new StringDecoder();
+    private static final VariantJsonDecoder VARIANT_JSON_DECODER = new VariantJsonDecoder();
+    private static final VariantBinaryDecoder VARIANT_BINARY_DECODER = new VariantBinaryDecoder();
     private static final Base64Decoder BASE_64_DECODER = new Base64Decoder();
     private static final ObjectDecoder OBJECT_DECODER = new ObjectDecoder();
 
-    public static TypeDecoder[] createTypeDecoders(List<Column> columns)
+    public static TypeDecoder[] createTypeDecoders(List<Column> columns, boolean supportsVariantBinary)
     {
         verify(!columns.isEmpty(), "Columns must not be empty");
         TypeDecoder[] decoders = new TypeDecoder[columns.size()];
         for (int i = 0; i < columns.size(); i++) {
-            decoders[i] = createTypeDecoder(columns.get(i).getTypeSignature());
+            decoders[i] = createTypeDecoder(columns.get(i).getTypeSignature(), supportsVariantBinary);
         }
         return decoders;
     }
@@ -100,7 +110,7 @@ public final class JsonDecodingUtils
                 throws IOException;
     }
 
-    private static TypeDecoder createTypeDecoder(ClientTypeSignature signature)
+    private static TypeDecoder createTypeDecoder(ClientTypeSignature signature, boolean supportsVariantBinary)
     {
         switch (signature.getRawType()) {
             case BIGINT:
@@ -117,12 +127,14 @@ public final class JsonDecodingUtils
                 return REAL_DECODER;
             case BOOLEAN:
                 return BOOLEAN_DECODER;
+            case VARIANT:
+                return supportsVariantBinary ? VARIANT_BINARY_DECODER : VARIANT_JSON_DECODER;
             case ARRAY:
-                return new ArrayDecoder(signature);
+                return new ArrayDecoder(signature, supportsVariantBinary);
             case MAP:
-                return new MapDecoder(signature);
+                return new MapDecoder(signature, supportsVariantBinary);
             case ROW:
-                return new RowDecoder(signature);
+                return new RowDecoder(signature, supportsVariantBinary);
             case VARCHAR:
             case JSON:
             case TIME:
@@ -287,6 +299,61 @@ public final class JsonDecodingUtils
         }
     }
 
+    private static class VariantJsonDecoder
+            implements TypeDecoder
+    {
+        @Override
+        public Object decode(JsonParser parser)
+                throws IOException
+        {
+            StringWriter writer = new StringWriter();
+            try (JsonGenerator generator = JSON_MAPPER.createGenerator(writer)) {
+                generator.copyCurrentStructure(parser);
+            }
+            return writer.toString();
+        }
+    }
+
+    private static class VariantBinaryDecoder
+            implements TypeDecoder
+    {
+        @Override
+        public Object decode(JsonParser parser)
+                throws IOException
+        {
+            if (requireNonNull(parser.currentToken()) != START_OBJECT) {
+                throw illegalToken(parser);
+            }
+
+            byte[] metadataBytes = null;
+            byte[] valueBytes = null;
+            while (parser.nextToken() != END_OBJECT) {
+                if (requireNonNull(parser.currentToken()) != FIELD_NAME) {
+                    throw illegalToken(parser);
+                }
+
+                String fieldName = parser.currentName();
+                if (parser.nextToken() != JsonToken.VALUE_STRING) {
+                    throw illegalToken(parser);
+                }
+
+                switch (fieldName) {
+                    case "metadata":
+                        metadataBytes = Base64.getDecoder().decode(parser.getValueAsString());
+                        break;
+                    case "value":
+                        valueBytes = Base64.getDecoder().decode(parser.getValueAsString());
+                        break;
+                }
+            }
+
+            if (metadataBytes == null || valueBytes == null) {
+                throw illegalToken(parser);
+            }
+            return EncodedVariant.fromBytes(metadataBytes, valueBytes);
+        }
+    }
+
     private static class Base64Decoder
             implements TypeDecoder
     {
@@ -303,11 +370,11 @@ public final class JsonDecodingUtils
     {
         private final TypeDecoder typeDecoder;
 
-        public ArrayDecoder(ClientTypeSignature signature)
+        public ArrayDecoder(ClientTypeSignature signature, boolean supportsVariantBinary)
         {
             requireNonNull(signature, "signature is null");
             checkArgument(signature.getRawType().equals(ARRAY), "not an array type signature: %s", signature);
-            this.typeDecoder = createTypeDecoder(signature.getArgumentsAsTypeSignatures().get(0));
+            this.typeDecoder = createTypeDecoder(signature.getArgumentsAsTypeSignatures().get(0), supportsVariantBinary);
         }
 
         @Override
@@ -339,12 +406,12 @@ public final class JsonDecodingUtils
         private final String keyType;
         private final TypeDecoder valueDecoder;
 
-        public MapDecoder(ClientTypeSignature signature)
+        public MapDecoder(ClientTypeSignature signature, boolean supportsVariantBinary)
         {
             requireNonNull(signature, "signature is null");
             checkArgument(signature.getRawType().equals(MAP), "not a map type signature: %s", signature);
             this.keyType = signature.getArgumentsAsTypeSignatures().get(0).getRawType();
-            this.valueDecoder = createTypeDecoder(signature.getArgumentsAsTypeSignatures().get(1));
+            this.valueDecoder = createTypeDecoder(signature.getArgumentsAsTypeSignatures().get(1), supportsVariantBinary);
         }
 
         @Override
@@ -422,7 +489,7 @@ public final class JsonDecodingUtils
         private final TypeDecoder[] fieldDecoders;
         private final List<Optional<String>> fieldNames;
 
-        private RowDecoder(ClientTypeSignature signature)
+        private RowDecoder(ClientTypeSignature signature, boolean supportsVariantBinary)
         {
             requireNonNull(signature, "signature is null");
             checkArgument(signature.getRawType().equals(ROW), "not a row type signature: %s", signature);
@@ -431,7 +498,7 @@ public final class JsonDecodingUtils
 
             int index = 0;
             for (ClientTypeSignatureParameter parameter : signature.getArguments()) {
-                fieldDecoders[index] = createTypeDecoder(parameter.getTypeSignature());
+                fieldDecoders[index] = createTypeDecoder(parameter.getTypeSignature(), supportsVariantBinary);
                 fieldNames.add(parameter.getName());
                 index++;
             }

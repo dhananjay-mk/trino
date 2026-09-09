@@ -123,6 +123,8 @@ import io.trino.operator.scalar.ArrayUnionFunction;
 import io.trino.operator.scalar.ArrayVectorFunctions;
 import io.trino.operator.scalar.ArraysOverlapFunction;
 import io.trino.operator.scalar.BitwiseFunctions;
+import io.trino.operator.scalar.CharMethods;
+import io.trino.operator.scalar.CharToVarcharCast;
 import io.trino.operator.scalar.CharacterStringCasts;
 import io.trino.operator.scalar.ColorFunctions;
 import io.trino.operator.scalar.CombineHashFunction;
@@ -150,6 +152,7 @@ import io.trino.operator.scalar.JoniRegexpFunctions;
 import io.trino.operator.scalar.JoniRegexpReplaceLambdaFunction;
 import io.trino.operator.scalar.JsonFunctions;
 import io.trino.operator.scalar.JsonOperators;
+import io.trino.operator.scalar.LegacyCharToVarcharCast;
 import io.trino.operator.scalar.LuhnCheckFunction;
 import io.trino.operator.scalar.MapCardinalityFunction;
 import io.trino.operator.scalar.MapConcatFunction;
@@ -176,6 +179,7 @@ import io.trino.operator.scalar.TryFunction;
 import io.trino.operator.scalar.TypeOfFunction;
 import io.trino.operator.scalar.UrlFunctions;
 import io.trino.operator.scalar.VarbinaryFunctions;
+import io.trino.operator.scalar.VarcharMethods;
 import io.trino.operator.scalar.VersionFunction;
 import io.trino.operator.scalar.WilsonInterval;
 import io.trino.operator.scalar.WordStemFunction;
@@ -187,6 +191,7 @@ import io.trino.operator.scalar.time.TimeOperators;
 import io.trino.operator.scalar.time.TimeToTimeWithTimeZoneCast;
 import io.trino.operator.scalar.time.TimeToTimestampCast;
 import io.trino.operator.scalar.time.TimeToTimestampWithTimeZoneCast;
+import io.trino.operator.scalar.timestamp.CharToTimestampCast;
 import io.trino.operator.scalar.timestamp.DateAdd;
 import io.trino.operator.scalar.timestamp.DateDiff;
 import io.trino.operator.scalar.timestamp.DateFormat;
@@ -224,6 +229,7 @@ import io.trino.operator.scalar.timestamp.VarcharToTimestampCast;
 import io.trino.operator.scalar.timestamp.WithTimeZone;
 import io.trino.operator.scalar.timestamptz.AtTimeZone;
 import io.trino.operator.scalar.timestamptz.AtTimeZoneWithOffset;
+import io.trino.operator.scalar.timestamptz.CharToTimestampWithTimeZoneCast;
 import io.trino.operator.scalar.timestamptz.CurrentTimestamp;
 import io.trino.operator.scalar.timestamptz.DateToTimestampWithTimeZoneCast;
 import io.trino.operator.scalar.timestamptz.TimestampWithTimeZoneOperators;
@@ -254,11 +260,13 @@ import io.trino.operator.window.PercentRankFunction;
 import io.trino.operator.window.RankFunction;
 import io.trino.operator.window.RowNumberFunction;
 import io.trino.spi.NodeVersion;
+import io.trino.spi.function.FunctionBundle;
 import io.trino.spi.type.TypeOperators;
 import io.trino.sql.DynamicFilters;
 import io.trino.type.BigintOperators;
 import io.trino.type.BlockTypeOperators;
 import io.trino.type.BooleanOperators;
+import io.trino.type.CharOperators;
 import io.trino.type.DateOperators;
 import io.trino.type.DateTimeOperators;
 import io.trino.type.DecimalOperators;
@@ -277,6 +285,8 @@ import io.trino.type.TDigestOperators;
 import io.trino.type.TinyintOperators;
 import io.trino.type.UuidOperators;
 import io.trino.type.VarcharOperators;
+import io.trino.type.VariantFunctions;
+import io.trino.type.VariantOperators;
 import io.trino.type.setdigest.BuildSetDigestAggregation;
 import io.trino.type.setdigest.MergeSetDigestAggregation;
 import io.trino.type.setdigest.SetDigestFunctions;
@@ -289,6 +299,7 @@ import static io.trino.operator.scalar.ArrayReduceFunction.ARRAY_REDUCE_FUNCTION
 import static io.trino.operator.scalar.ArraySubscriptOperator.ARRAY_SUBSCRIPT;
 import static io.trino.operator.scalar.ArrayToElementConcatFunction.ARRAY_TO_ELEMENT_CONCAT_FUNCTION;
 import static io.trino.operator.scalar.ArrayToJsonCast.ARRAY_TO_JSON;
+import static io.trino.operator.scalar.ArrayToVariantCast.ARRAY_TO_VARIANT;
 import static io.trino.operator.scalar.ArrayTransformFunction.ARRAY_TRANSFORM_FUNCTION;
 import static io.trino.operator.scalar.CastFromUnknownOperator.CAST_FROM_UNKNOWN;
 import static io.trino.operator.scalar.ConcatFunction.VARBINARY_CONCAT;
@@ -310,14 +321,20 @@ import static io.trino.operator.scalar.MapConstructor.MAP_CONSTRUCTOR;
 import static io.trino.operator.scalar.MapElementAtFunction.MAP_ELEMENT_AT;
 import static io.trino.operator.scalar.MapFilterFunction.MAP_FILTER_FUNCTION;
 import static io.trino.operator.scalar.MapToJsonCast.MAP_TO_JSON;
+import static io.trino.operator.scalar.MapToVariantCast.MAP_TO_VARIANT;
 import static io.trino.operator.scalar.MapTransformValuesFunction.MAP_TRANSFORM_VALUES_FUNCTION;
 import static io.trino.operator.scalar.MapZipWithFunction.MAP_ZIP_WITH_FUNCTION;
 import static io.trino.operator.scalar.MathFunctions.DECIMAL_MOD_FUNCTION;
 import static io.trino.operator.scalar.Re2JCastToRegexpFunction.castCharToRe2JRegexp;
 import static io.trino.operator.scalar.Re2JCastToRegexpFunction.castVarcharToRe2JRegexp;
+import static io.trino.operator.scalar.RowFieldsFunction.ROW_FIELDS_FUNCTION;
 import static io.trino.operator.scalar.RowToJsonCast.ROW_TO_JSON;
 import static io.trino.operator.scalar.RowToRowCast.ROW_TO_ROW_CAST;
+import static io.trino.operator.scalar.RowToVariantCast.ROW_TO_VARIANT;
 import static io.trino.operator.scalar.TryCastFunction.TRY_CAST;
+import static io.trino.operator.scalar.VariantToArrayCast.VARIANT_TO_ARRAY;
+import static io.trino.operator.scalar.VariantToMapCast.VARIANT_TO_MAP;
+import static io.trino.operator.scalar.VariantToRowCast.VARIANT_TO_ROW;
 import static io.trino.operator.scalar.ZipFunction.ZIP_FUNCTIONS;
 import static io.trino.operator.scalar.ZipWithFunction.ZIP_WITH_FUNCTION;
 import static io.trino.operator.scalar.json.JsonArrayFunction.JSON_ARRAY_FUNCTION;
@@ -334,6 +351,7 @@ import static io.trino.type.DecimalCasts.DECIMAL_TO_REAL_CAST;
 import static io.trino.type.DecimalCasts.DECIMAL_TO_SMALLINT_CAST;
 import static io.trino.type.DecimalCasts.DECIMAL_TO_TINYINT_CAST;
 import static io.trino.type.DecimalCasts.DECIMAL_TO_VARCHAR_CAST;
+import static io.trino.type.DecimalCasts.DECIMAL_TO_VARIANT_CAST;
 import static io.trino.type.DecimalCasts.DOUBLE_TO_DECIMAL_CAST;
 import static io.trino.type.DecimalCasts.INTEGER_TO_DECIMAL_CAST;
 import static io.trino.type.DecimalCasts.JSON_TO_DECIMAL_CAST;
@@ -342,9 +360,10 @@ import static io.trino.type.DecimalCasts.REAL_TO_DECIMAL_CAST;
 import static io.trino.type.DecimalCasts.SMALLINT_TO_DECIMAL_CAST;
 import static io.trino.type.DecimalCasts.TINYINT_TO_DECIMAL_CAST;
 import static io.trino.type.DecimalCasts.VARCHAR_TO_DECIMAL_CAST;
+import static io.trino.type.DecimalCasts.VARIANT_TO_DECIMAL_CAST;
 import static io.trino.type.DecimalOperators.DECIMAL_ADD_OPERATOR;
 import static io.trino.type.DecimalOperators.DECIMAL_DIVIDE_OPERATOR;
-import static io.trino.type.DecimalOperators.DECIMAL_MODULUS_OPERATOR;
+import static io.trino.type.DecimalOperators.DECIMAL_MODULO_OPERATOR;
 import static io.trino.type.DecimalOperators.DECIMAL_MULTIPLY_OPERATOR;
 import static io.trino.type.DecimalOperators.DECIMAL_SUBTRACT_OPERATOR;
 import static io.trino.type.DecimalOperators.LEGACY_DECIMAL_ADD_OPERATOR;
@@ -439,6 +458,8 @@ public final class SystemFunctionBundle
                 .scalars(SequenceFunction.class)
                 .scalars(SessionFunctions.class)
                 .scalars(StringFunctions.class)
+                .scalars(VarcharMethods.class)
+                .scalars(CharMethods.class)
                 .scalars(WordStemFunction.class)
                 .scalar(SplitToMapFunction.class)
                 .scalar(SplitToMultimapFunction.class)
@@ -463,6 +484,17 @@ public final class SystemFunctionBundle
                 .scalars(JsonInputFunctions.class)
                 .scalars(JsonOutputFunctions.class)
                 .functions(JSON_OBJECT_FUNCTION, JSON_ARRAY_FUNCTION)
+                .scalars(VariantOperators.class)
+                .scalar(VariantOperators.VariantToTimeCast.class)
+                .scalar(VariantOperators.VariantFromTimeCast.class)
+                .scalar(VariantOperators.VariantToTimestampCast.class)
+                .scalar(VariantOperators.VariantFromTimestampCast.class)
+                .scalar(VariantOperators.VariantToTimestampWithTimeZoneCasts.class)
+                .scalar(VariantOperators.VariantFromTimestampWithTimeZoneCasts.class)
+                .functions(VARIANT_TO_ARRAY, ARRAY_TO_VARIANT)
+                .functions(VARIANT_TO_MAP, MAP_TO_VARIANT)
+                .functions(VARIANT_TO_ROW, ROW_TO_VARIANT)
+                .scalars(VariantFunctions.class)
                 .scalars(ColorFunctions.class)
                 .scalars(HyperLogLogFunctions.class)
                 .scalars(QuantileDigestFunctions.class)
@@ -475,6 +507,7 @@ public final class SystemFunctionBundle
                 .scalars(DoubleOperators.class)
                 .scalars(RealOperators.class)
                 .scalars(NumberOperators.class)
+                .scalars(CharOperators.class)
                 .scalars(VarcharOperators.class)
                 .scalars(DateOperators.class)
                 .scalars(IntervalDayTimeOperators.class)
@@ -501,6 +534,7 @@ public final class SystemFunctionBundle
                 .scalars(FailureFunction.class)
                 .scalars(JoniRegexpCasts.class)
                 .scalars(CharacterStringCasts.class)
+                .scalars(featuresConfig.isLegacyVarcharToCharCoercion() ? LegacyCharToVarcharCast.class : CharToVarcharCast.class)
                 .scalars(LuhnCheckFunction.class)
                 .scalar(DecimalOperators.Negation.class)
                 .functions(IDENTITY_CAST, CAST_FROM_UNKNOWN)
@@ -561,11 +595,12 @@ public final class SystemFunctionBundle
                 .functions(VARCHAR_TO_DECIMAL_CAST, INTEGER_TO_DECIMAL_CAST, BIGINT_TO_DECIMAL_CAST, DOUBLE_TO_DECIMAL_CAST, REAL_TO_DECIMAL_CAST, BOOLEAN_TO_DECIMAL_CAST, TINYINT_TO_DECIMAL_CAST, SMALLINT_TO_DECIMAL_CAST)
                 .functions(NUMBER_TO_DECIMAL_CAST, DECIMAL_TO_NUMBER_CAST)
                 .functions(JSON_TO_DECIMAL_CAST, DECIMAL_TO_JSON_CAST)
+                .functions(VARIANT_TO_DECIMAL_CAST, DECIMAL_TO_VARIANT_CAST)
                 .functions(featuresConfig.isLegacyArithmeticDecimalOperators() ? LEGACY_DECIMAL_ADD_OPERATOR : DECIMAL_ADD_OPERATOR)
                 .functions(featuresConfig.isLegacyArithmeticDecimalOperators() ? LEGACY_DECIMAL_SUBTRACT_OPERATOR : DECIMAL_SUBTRACT_OPERATOR)
                 .functions(featuresConfig.isLegacyArithmeticDecimalOperators() ? LEGACY_DECIMAL_MULTIPLY_OPERATOR : DECIMAL_MULTIPLY_OPERATOR)
                 .functions(featuresConfig.isLegacyArithmeticDecimalOperators() ? LEGACY_DECIMAL_DIVIDE_OPERATOR : DECIMAL_DIVIDE_OPERATOR)
-                .functions(DECIMAL_MODULUS_OPERATOR)
+                .functions(DECIMAL_MODULO_OPERATOR)
                 .function(DECIMAL_TO_DECIMAL_SATURATED_FLOOR_CAST)
                 .functions(DECIMAL_TO_BIGINT_SATURATED_FLOOR_CAST, BIGINT_TO_DECIMAL_SATURATED_FLOOR_CAST)
                 .functions(DECIMAL_TO_INTEGER_SATURATED_FLOOR_CAST, INTEGER_TO_DECIMAL_SATURATED_FLOOR_CAST)
@@ -598,6 +633,7 @@ public final class SystemFunctionBundle
                 .functions(MAP_FILTER_FUNCTION, new MapTransformKeysFunction(blockTypeOperators), MAP_TRANSFORM_VALUES_FUNCTION)
                 .function(FORMAT_FUNCTION)
                 .function(TRY_CAST)
+                .function(ROW_FIELDS_FUNCTION)
                 .function(new GenericReadValueOperator(typeOperators))
                 .function(new GenericEqualOperator(typeOperators))
                 .function(new GenericHashCodeOperator(typeOperators))
@@ -639,6 +675,7 @@ public final class SystemFunctionBundle
                 .scalar(TimeWithTimeZoneToTimestampCast.class)
                 .scalar(TimestampWithTimeZoneToTimestampCast.class)
                 .scalar(VarcharToTimestampCast.class)
+                .scalar(CharToTimestampCast.class)
                 .scalar(LocalTimestamp.class)
                 .scalar(DateTrunc.class)
                 .scalar(HumanReadableSeconds.class)
@@ -707,7 +744,8 @@ public final class SystemFunctionBundle
                 .scalar(TimestampWithTimeZoneToVarcharCast.class)
                 .scalar(TimeToTimestampWithTimeZoneCast.class)
                 .scalar(TimeWithTimeZoneToTimestampWithTimeZoneCast.class)
-                .scalar(VarcharToTimestampWithTimeZoneCast.class);
+                .scalar(VarcharToTimestampWithTimeZoneCast.class)
+                .scalar(CharToTimestampWithTimeZoneCast.class);
 
         // time without time zone functions and operators
         builder.scalar(LocalTimeFunction.class)
@@ -740,14 +778,14 @@ public final class SystemFunctionBundle
                 .scalar(CurrentTime.class);
 
         switch (featuresConfig.getRegexLibrary()) {
-            case JONI:
+            case JONI -> {
                 builder.scalars(JoniRegexpFunctions.class);
                 builder.scalar(JoniRegexpReplaceLambdaFunction.class);
-                break;
-            case RE2J:
+            }
+            case RE2J -> {
                 builder.scalars(Re2JRegexpFunctions.class);
                 builder.scalar(Re2JRegexpReplaceLambdaFunction.class);
-                break;
+            }
         }
 
         return builder.build();

@@ -65,11 +65,7 @@ public class BenchmarkCopyPositions
         @Param({"false", "true"})
         private boolean nullsAllowed;
 
-        @Param({
-                "GROUPED",
-                "SEQUENCE",
-                "RANDOM",
-        })
+        @Param
         private SelectedPositions selectedPositions;
 
         @Param({"VARCHAR", "ROW(BIGINT)"})
@@ -100,9 +96,20 @@ public class BenchmarkCopyPositions
                 block = createBlockBuilderWithValues(slices).build();
             }
             else if (type.equals("ROW(BIGINT)")) {
-                Optional<boolean[]> rowIsNull = nullsAllowed ? Optional.of(generateIsNull(POSITIONS)) : Optional.empty();
-                LongArrayBlock randomLongArrayBlock = new LongArrayBlock(POSITIONS, rowIsNull, new Random(SEED).longs().limit(POSITIONS).toArray());
-                block = RowBlock.fromNotNullSuppressedFieldBlocks(POSITIONS, rowIsNull, new Block[] {randomLongArrayBlock});
+                Optional<long[]> valueIsValid = Optional.empty();
+                if (nullsAllowed) {
+                    long[] generatedValidity = new long[Bitmap.wordsForBits(POSITIONS)];
+                    Random random = new Random(SEED);
+                    for (int position = 0; position < POSITIONS; position++) {
+                        boolean isNull = randomNullChance(random);
+                        if (!isNull) {
+                            Bitmap.set(generatedValidity, 0, position);
+                        }
+                    }
+                    valueIsValid = Optional.of(generatedValidity);
+                }
+                LongArrayBlock randomLongArrayBlock = new LongArrayBlock(POSITIONS, valueIsValid, new Random(SEED).longs().limit(POSITIONS).toArray());
+                block = RowBlock.fromNotNullSuppressedFieldBlocks(POSITIONS, valueIsValid, new Block[] {randomLongArrayBlock});
             }
         }
 
@@ -143,16 +150,6 @@ public class BenchmarkCopyPositions
                 }
             }
             return blockBuilder;
-        }
-
-        private static boolean[] generateIsNull(int positionCount)
-        {
-            Random random = new Random(SEED);
-            boolean[] result = new boolean[positionCount];
-            for (int i = 0; i < positionCount; i++) {
-                result[i] = randomNullChance(random);
-            }
-            return result;
         }
 
         public int[] getPositionsIds()

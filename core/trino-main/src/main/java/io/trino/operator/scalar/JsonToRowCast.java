@@ -24,13 +24,11 @@ import io.trino.spi.TrinoException;
 import io.trino.spi.block.Block;
 import io.trino.spi.block.BlockBuilder;
 import io.trino.spi.block.SqlRow;
-import io.trino.spi.connector.ConnectorSession;
 import io.trino.spi.function.BoundSignature;
 import io.trino.spi.function.FunctionMetadata;
 import io.trino.spi.function.Signature;
 import io.trino.spi.function.TypeVariableConstraint;
 import io.trino.spi.type.RowType;
-import io.trino.spi.type.TypeSignature;
 import io.trino.util.JsonCastException;
 import io.trino.util.JsonUtil.BlockBuilderAppender;
 
@@ -40,6 +38,7 @@ import static io.trino.spi.StandardErrorCode.INVALID_CAST_ARGUMENT;
 import static io.trino.spi.function.InvocationConvention.InvocationArgumentConvention.NEVER_NULL;
 import static io.trino.spi.function.InvocationConvention.InvocationReturnConvention.NULLABLE_RETURN;
 import static io.trino.spi.function.OperatorType.CAST;
+import static io.trino.spi.type.TypeTemplates.typeVariable;
 import static io.trino.type.JsonType.JSON;
 import static io.trino.util.Failures.checkCondition;
 import static io.trino.util.JsonUtil.BlockBuilderAppender.createBlockBuilderAppender;
@@ -54,7 +53,7 @@ public class JsonToRowCast
         extends SqlScalarFunction
 {
     public static final JsonToRowCast JSON_TO_ROW = new JsonToRowCast();
-    private static final MethodHandle METHOD_HANDLE = methodHandle(JsonToRowCast.class, "toRow", RowType.class, BlockBuilderAppender.class, ConnectorSession.class, Slice.class);
+    private static final MethodHandle METHOD_HANDLE = methodHandle(JsonToRowCast.class, "toRow", RowType.class, BlockBuilderAppender.class, Slice.class);
 
     private static final JsonMapper JSON_MAPPER = new JsonMapper(createJsonFactory());
 
@@ -66,9 +65,8 @@ public class JsonToRowCast
                                 // this is technically a recursive constraint for cast, but TypeRegistry.canCast has explicit handling for json to row cast
                                 TypeVariableConstraint.builder("T")
                                         .rowType()
-                                        .castableFrom(JSON)
                                         .build())
-                        .returnType(new TypeSignature("T"))
+                        .returnType(typeVariable("T"))
                         .argumentType(JSON)
                         .build())
                 .nullable()
@@ -91,15 +89,14 @@ public class JsonToRowCast
     }
 
     @UsedByGeneratedCode
-    public static SqlRow toRow(
-            RowType rowType,
-            BlockBuilderAppender rowAppender,
-            ConnectorSession connectorSession,
-            Slice json)
+    public static SqlRow toRow(RowType rowType, BlockBuilderAppender rowAppender, Slice json)
     {
         try (JsonParser jsonParser = createJsonParser(JSON_MAPPER, json)) {
             jsonParser.nextToken();
             if (jsonParser.getCurrentToken() == JsonToken.VALUE_NULL) {
+                if (jsonParser.nextToken() != null) {
+                    throw new JsonCastException(format("Unexpected trailing token: %s", jsonParser.getText()));
+                }
                 return null;
             }
 

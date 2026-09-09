@@ -13,11 +13,6 @@
  */
 package io.trino.operator;
 
-import com.esri.core.geometry.Geometry;
-import com.esri.core.geometry.GeometryCursor;
-import com.esri.core.geometry.Operator;
-import com.esri.core.geometry.OperatorFactoryLocal;
-import com.esri.core.geometry.ogc.OGCGeometry;
 import io.airlift.slice.Slice;
 import io.airlift.units.DataSize;
 import io.trino.Session;
@@ -30,6 +25,7 @@ import io.trino.sql.gen.JoinFilterFunctionCompiler;
 import it.unimi.dsi.fastutil.longs.LongArrayList;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import org.locationtech.jts.geom.Envelope;
+import org.locationtech.jts.geom.Geometry;
 import org.locationtech.jts.index.strtree.AbstractNode;
 import org.locationtech.jts.index.strtree.ItemBoundable;
 import org.locationtech.jts.index.strtree.STRtree;
@@ -43,7 +39,7 @@ import java.util.function.Supplier;
 
 import static com.google.common.base.Verify.verifyNotNull;
 import static io.airlift.slice.SizeOf.instanceSize;
-import static io.trino.geospatial.serde.GeometrySerde.deserialize;
+import static io.trino.geospatial.serde.JtsGeometrySerde.deserialize;
 import static io.trino.operator.PagesSpatialIndex.EMPTY_INDEX;
 import static io.trino.operator.SyntheticAddress.decodePosition;
 import static io.trino.operator.SyntheticAddress.decodeSliceIndex;
@@ -67,6 +63,7 @@ public class PagesSpatialIndexSupplier
     private final SpatialPredicate spatialRelationshipTest;
     private final Optional<JoinFilterFunctionCompiler.JoinFilterFunctionFactory> filterFunctionFactory;
     private final STRtree rtree;
+    private final SpatialIndexSridState sridState;
     private final Map<Integer, Rectangle> partitions;
     private final long memorySizeInBytes;
 
@@ -91,17 +88,21 @@ public class PagesSpatialIndexSupplier
         this.filterFunctionFactory = filterFunctionFactory;
         this.partitions = partitions;
 
-        this.rtree = buildRTree(addresses, channels, geometryChannel, radiusChannel, constantRadius, partitionChannel);
+        RTreeBuildResult rtreeBuildResult = buildRTree(addresses, channels, geometryChannel, radiusChannel, constantRadius, partitionChannel);
+        this.rtree = rtreeBuildResult.rtree();
+        this.sridState = rtreeBuildResult.sridState();
         this.radiusChannel = radiusChannel;
         this.constantRadius = constantRadius;
         this.memorySizeInBytes = INSTANCE_SIZE +
                 (rtree.isEmpty() ? 0 : STRTREE_INSTANCE_SIZE + computeMemorySizeInBytes(rtree.getRoot()));
     }
 
-    private static STRtree buildRTree(LongArrayList addresses, List<ObjectArrayList<Block>> channels, int geometryChannel, OptionalInt radiusChannel, OptionalDouble constantRadius, OptionalInt partitionChannel)
+    private record RTreeBuildResult(STRtree rtree, SpatialIndexSridState sridState) {}
+
+    private static RTreeBuildResult buildRTree(LongArrayList addresses, List<ObjectArrayList<Block>> channels, int geometryChannel, OptionalInt radiusChannel, OptionalDouble constantRadius, OptionalInt partitionChannel)
     {
         STRtree rtree = new STRtree();
-        Operator relateOperator = OperatorFactoryLocal.getInstance().getOperator(Operator.Type.Relate);
+        SpatialIndexSridState sridState = SpatialIndexSridState.EMPTY;
 
         for (int position = 0; position < addresses.size(); position++) {
             long pageAddress = addresses.getLong(position);
@@ -117,9 +118,9 @@ public class PagesSpatialIndexSupplier
             }
 
             Slice slice = block.getSlice(valueBlockPosition);
-            OGCGeometry ogcGeometry = deserialize(slice);
-            verifyNotNull(ogcGeometry);
-            if (ogcGeometry.isEmpty()) {
+            Geometry geometry = deserialize(slice);
+            verifyNotNull(geometry);
+            if (geometry.isEmpty()) {
                 continue;
             }
 
@@ -135,10 +136,7 @@ public class PagesSpatialIndexSupplier
                 continue;
             }
 
-            if (radiusChannel.isEmpty() && constantRadius.isEmpty()) {
-                // If radius is supplied, this is a distance query, for which our acceleration won't help.
-                accelerateGeometry(ogcGeometry, relateOperator);
-            }
+            sridState = sridState.add(geometry.getSRID());
 
             int partition = -1;
             if (partitionChannel.isPresent()) {
@@ -146,19 +144,24 @@ public class PagesSpatialIndexSupplier
                 partition = INTEGER.getInt(partitionBlock, blockPosition);
             }
 
-            rtree.insert(getEnvelope(ogcGeometry, radius), new GeometryWithPosition(ogcGeometry, partition, position));
+            rtree.insert(getEnvelope(geometry, radius), new GeometryWithPosition(geometry, partition, position));
         }
 
         rtree.build();
-        return rtree;
+        return new RTreeBuildResult(rtree, sridState);
     }
 
-    private static Envelope getEnvelope(OGCGeometry ogcGeometry, double radius)
+    private static Envelope getEnvelope(Geometry geometry, double radius)
     {
-        com.esri.core.geometry.Envelope envelope = new com.esri.core.geometry.Envelope();
-        ogcGeometry.getEsriGeometry().queryEnvelope(envelope);
-
-        return new Envelope(envelope.getXMin() - radius, envelope.getXMax() + radius, envelope.getYMin() - radius, envelope.getYMax() + radius);
+        Envelope envelope = geometry.getEnvelopeInternal();
+        if (radius == 0.0) {
+            return envelope;
+        }
+        return new Envelope(
+                envelope.getMinX() - radius,
+                envelope.getMaxX() + radius,
+                envelope.getMinY() - radius,
+                envelope.getMaxY() + radius);
     }
 
     private long computeMemorySizeInBytes(AbstractNode root)
@@ -174,19 +177,6 @@ public class PagesSpatialIndexSupplier
         return ENVELOPE_INSTANCE_SIZE + ((GeometryWithPosition) item.getItem()).getEstimatedMemorySizeInBytes();
     }
 
-    private static void accelerateGeometry(OGCGeometry ogcGeometry, Operator relateOperator)
-    {
-        // Recurse into GeometryCollections
-        GeometryCursor cursor = ogcGeometry.getEsriGeometryCursor();
-        while (true) {
-            Geometry esriGeometry = cursor.next();
-            if (esriGeometry == null) {
-                break;
-            }
-            relateOperator.accelerateGeometry(esriGeometry, null, Geometry.GeometryAccelerationDegree.enumMild);
-        }
-    }
-
     // doesn't include memory used by channels and addresses which are shared with PagesIndex
     public DataSize getEstimatedSize()
     {
@@ -199,6 +189,6 @@ public class PagesSpatialIndexSupplier
         if (rtree.isEmpty()) {
             return EMPTY_INDEX;
         }
-        return new PagesRTreeIndex(session, addresses, outputChannels, channels, rtree, radiusChannel, constantRadius, spatialRelationshipTest, filterFunctionFactory, partitions);
+        return new PagesRTreeIndex(session, addresses, outputChannels, channels, rtree, sridState, radiusChannel, constantRadius, spatialRelationshipTest, filterFunctionFactory, partitions);
     }
 }

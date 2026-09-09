@@ -22,6 +22,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.util.List;
 
+import static io.trino.hive.formats.esri.EsriDeserializer.Format.ESRI;
 import static io.trino.spi.type.BigintType.BIGINT;
 import static io.trino.spi.type.VarbinaryType.VARBINARY;
 import static io.trino.spi.type.VarcharType.VARCHAR;
@@ -41,32 +42,32 @@ public class TestEsriReader
             throws IOException
     {
         String json =
-        """
-        {
-            "features": [
+                """
                 {
-                    "attributes": {
-                        "id": 1,
-                        "name": "Feature 1"
-                    },
-                    "geometry": {
-                        "x": 10,
-                        "y": 20
-                    }
-                },
-                {
-                    "attributes": {
-                        "id": 2,
-                        "name": "Feature 2"
-                    },
-                    "geometry": {
-                        "x": 30,
-                        "y": 40
-                    }
+                    "features": [
+                        {
+                            "attributes": {
+                                "id": 1,
+                                "name": "Feature 1"
+                            },
+                            "geometry": {
+                                "x": 10,
+                                "y": 20
+                            }
+                        },
+                        {
+                            "attributes": {
+                                "id": 2,
+                                "name": "Feature 2"
+                            },
+                            "geometry": {
+                                "x": 30,
+                                "y": 40
+                            }
+                        }
+                    ]
                 }
-            ]
-        }
-        """;
+                """;
 
         Page page = readAll(json);
         assertThat(page.getPositionCount()).isEqualTo(2);
@@ -77,11 +78,11 @@ public class TestEsriReader
             throws IOException
     {
         String json =
-        """
-        {
-            "features": []
-        }
-        """;
+                """
+                {
+                    "features": []
+                }
+                """;
 
         Page page = readAll(json);
         assertThat(page.getPositionCount()).isZero();
@@ -92,11 +93,11 @@ public class TestEsriReader
             throws IOException
     {
         String json =
-        """
-        {
-            "features": null
-        }
-        """;
+                """
+                {
+                    "features": null
+                }
+                """;
 
         Page page = readAll(json);
         assertThat(page.getPositionCount()).isZero();
@@ -106,13 +107,13 @@ public class TestEsriReader
     public void testNumberFeaturesFails()
     {
         String json =
-        """
-        {
-            "features": 42
-        }
-        """;
+                """
+                {
+                    "features": 42
+                }
+                """;
 
-        assertThatThrownBy(() -> new EsriReader(new ByteArrayInputStream(json.getBytes(UTF_8)), new EsriDeserializer(TEST_COLUMNS)))
+        assertThatThrownBy(() -> new EsriReader(new ByteArrayInputStream(json.getBytes(UTF_8)), new EsriDeserializer(TEST_COLUMNS, ESRI)))
                 .isInstanceOf(IOException.class)
                 .hasMessage("Invalid JSON: Features field must be an array");
     }
@@ -121,13 +122,13 @@ public class TestEsriReader
     public void testObjectFeaturesFails()
     {
         String json =
-        """
-        {
-            "features": {}
-        }
-        """;
+                """
+                {
+                    "features": {}
+                }
+                """;
 
-        assertThatThrownBy(() -> new EsriReader(new ByteArrayInputStream(json.getBytes(UTF_8)), new EsriDeserializer(TEST_COLUMNS)))
+        assertThatThrownBy(() -> new EsriReader(new ByteArrayInputStream(json.getBytes(UTF_8)), new EsriDeserializer(TEST_COLUMNS, ESRI)))
                 .isInstanceOf(IOException.class)
                 .hasMessage("Invalid JSON: Features field must be an array");
     }
@@ -137,11 +138,11 @@ public class TestEsriReader
             throws IOException
     {
         String json =
-        """
-        {
-            "someOtherField": []
-        }
-        """;
+                """
+                {
+                    "someOtherField": []
+                }
+                """;
 
         Page page = readAll(json);
         assertThat(page.getPositionCount()).isZero();
@@ -169,11 +170,15 @@ public class TestEsriReader
                             "y": %d
                         }
                     }
-                    """, i, i, i * 10, i * 20));
+                    """,
+                    i,
+                    i,
+                    i * 10,
+                    i * 20));
         }
         jsonBuilder.append("]}");
 
-        EsriDeserializer deserializer = new EsriDeserializer(TEST_COLUMNS);
+        EsriDeserializer deserializer = new EsriDeserializer(TEST_COLUMNS, ESRI);
         PageBuilder pageBuilder = new PageBuilder(deserializer.getTypes());
 
         try (EsriReader reader = new EsriReader(new ByteArrayInputStream(jsonBuilder.toString().getBytes(UTF_8)), deserializer)) {
@@ -190,17 +195,17 @@ public class TestEsriReader
             throws IOException
     {
         String json =
-        """
-        {
-            "features": [
+                """
                 {
-                    "attributes": {
-                        "id": 1
-                    }
-                }
-            ]
-            EVERYTHING AFTER ARRAY CLOSE IS IGNORED
-        """;
+                    "features": [
+                        {
+                            "attributes": {
+                                "id": 1
+                            }
+                        }
+                    ]
+                    EVERYTHING AFTER ARRAY CLOSE IS IGNORED
+                """;
 
         Page page = readAll(json);
         assertThat(page.getPositionCount()).isEqualTo(1);
@@ -211,24 +216,24 @@ public class TestEsriReader
             throws IOException
     {
         String json =
-        """
-        {
-            "features": [
+                """
                 {
-                    "attributes": {
-                        "id": 1
-                    }
+                    "features": [
+                        {
+                            "attributes": {
+                                "id": 1
+                            }
+                        }
+                    ],
+                    "features": [
+                        {
+                            "attributes": {
+                                "id": 2
+                            }
+                        }
+                    ]
                 }
-            ],
-            "features": [
-                {
-                    "attributes": {
-                        "id": 2
-                    }
-                }
-            ]
-        }
-        """;
+                """;
 
         Page page = readAll(json);
         assertThat(page.getPositionCount()).isEqualTo(1);
@@ -239,26 +244,26 @@ public class TestEsriReader
             throws IOException
     {
         String json =
-        """
-        {
-            "bad": {
-                "features": [
-                    {
-                        "attributes": {
-                            "id": 1
-                        }
-                    }
-                ]
-            },
-            "features": [
+                """
                 {
-                    "attributes": {
-                        "id": 77
-                    }
+                    "bad": {
+                        "features": [
+                            {
+                                "attributes": {
+                                    "id": 1
+                                }
+                            }
+                        ]
+                    },
+                    "features": [
+                        {
+                            "attributes": {
+                                "id": 77
+                            }
+                        }
+                    ]
                 }
-            ]
-        }
-        """;
+                """;
 
         Page page = readAll(json);
         assertThat(page.getPositionCount()).isEqualTo(1);
@@ -268,7 +273,7 @@ public class TestEsriReader
     private static Page readAll(String json)
             throws IOException
     {
-        EsriDeserializer deserializer = new EsriDeserializer(TEST_COLUMNS);
+        EsriDeserializer deserializer = new EsriDeserializer(TEST_COLUMNS, ESRI);
         EsriReader reader = new EsriReader(new ByteArrayInputStream(json.getBytes(UTF_8)), deserializer);
         PageBuilder pageBuilder = new PageBuilder(deserializer.getTypes());
         try {

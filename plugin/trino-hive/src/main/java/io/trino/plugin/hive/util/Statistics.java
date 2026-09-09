@@ -26,7 +26,6 @@ import io.trino.plugin.hive.HiveColumnStatisticType;
 import io.trino.spi.Page;
 import io.trino.spi.TrinoException;
 import io.trino.spi.block.Block;
-import io.trino.spi.block.Fixed12Block;
 import io.trino.spi.statistics.ColumnStatisticMetadata;
 import io.trino.spi.statistics.ComputedStatistics;
 import io.trino.spi.type.DecimalType;
@@ -68,7 +67,6 @@ import static io.trino.spi.type.DoubleType.DOUBLE;
 import static io.trino.spi.type.IntegerType.INTEGER;
 import static io.trino.spi.type.RealType.REAL;
 import static io.trino.spi.type.SmallintType.SMALLINT;
-import static io.trino.spi.type.TimestampType.TIMESTAMP_NANOS;
 import static io.trino.spi.type.TinyintType.TINYINT;
 import static java.lang.Float.intBitsToFloat;
 import static java.lang.Math.toIntExact;
@@ -98,25 +96,30 @@ public final class Statistics
     private static void setColumnStatisticsForEmptyPartition(Type columnType, HiveColumnStatistics.Builder result, HiveColumnStatisticType columnStatisticType)
     {
         switch (columnStatisticType) {
-            case MAX_VALUE_SIZE_IN_BYTES:
+            case MAX_VALUE_SIZE_IN_BYTES -> {
                 result.setMaxValueSizeInBytes(0);
                 return;
-            case TOTAL_SIZE_IN_BYTES:
+            }
+            case TOTAL_SIZE_IN_BYTES -> {
                 result.setAverageColumnLength(0);
                 return;
-            case NUMBER_OF_DISTINCT_VALUES:
+            }
+            case NUMBER_OF_DISTINCT_VALUES -> {
                 result.setDistinctValuesWithNullCount(0);
                 return;
-            case NUMBER_OF_NON_NULL_VALUES:
+            }
+            case NUMBER_OF_NON_NULL_VALUES -> {
                 result.setNullsCount(0);
                 return;
-            case NUMBER_OF_TRUE_VALUES:
+            }
+            case NUMBER_OF_TRUE_VALUES -> {
                 result.setBooleanStatistics(new BooleanStatistics(OptionalLong.of(0L), OptionalLong.of(0L)));
                 return;
-            case MIN_VALUE:
-            case MAX_VALUE:
+            }
+            case MIN_VALUE, MAX_VALUE -> {
                 setMinMaxForEmptyPartition(columnType, result);
                 return;
+            }
         }
         throw new TrinoException(HIVE_UNKNOWN_COLUMN_STATISTIC_TYPE, "Unknown column statistics type: " + columnStatisticType.name());
     }
@@ -159,7 +162,9 @@ public final class Statistics
     private static List<String> getPartitionValues(ComputedStatistics statistics, List<String> partitionColumns, List<Type> partitionColumnTypes)
     {
         checkArgument(statistics.getGroupingColumns().equals(partitionColumns),
-                "Unexpected grouping. Partition columns: %s. Grouping columns: %s", partitionColumns, statistics.getGroupingColumns());
+                "Unexpected grouping. Partition columns: %s. Grouping columns: %s",
+                partitionColumns,
+                statistics.getGroupingColumns());
         Page partitionColumnsPage = new Page(1, statistics.getGroupingValues().toArray(new Block[] {}));
         return createPartitionValues(partitionColumnTypes, partitionColumnsPage, 0);
     }
@@ -177,7 +182,7 @@ public final class Statistics
     {
         Map<String, Map<HiveColumnStatisticType, Block>> result = new HashMap<>();
         computedStatistics.forEach((metadata, block) -> {
-            Map<HiveColumnStatisticType, Block> columnStatistics = result.computeIfAbsent(metadata.getColumnName(), key -> new HashMap<>());
+            Map<HiveColumnStatisticType, Block> columnStatistics = result.computeIfAbsent(metadata.getColumnName(), _ -> new HashMap<>());
             columnStatistics.put(HiveColumnStatisticType.from(metadata), block);
         });
         return result.entrySet()
@@ -302,18 +307,11 @@ public final class Statistics
         if (block.isNull(0)) {
             return OptionalLong.empty();
         }
-        // TODO: https://github.com/trinodb/trino/issues/28835
-        //  The columnTypes map in HiveMetadata.finishChangingTable is built using the deprecated
-        //   getTypeSignature(HiveType) which always resolves TIMESTAMP to milliseconds,
-        //   ignoring the session's hive.timestamp-precision setting. The statistics
-        //   blocks however are computed by the engine using the session's precision.
-        //   The fix is to pass the session's timestamp precision when building columnTypes in HiveMetadata.
-        if (block instanceof Fixed12Block) {
-            LongTimestamp timestamp = (LongTimestamp) TIMESTAMP_NANOS.getObject(block, 0);
-            // Note: we're truncating even for the max value. Statistics are estimate so this should be fine.
-            return OptionalLong.of(timestamp.getEpochMicros());
+        if (((TimestampType) type).isShort()) {
+            return OptionalLong.of(type.getLong(block, 0));
         }
-        return OptionalLong.of(type.getLong(block, 0));
+        // Note: we're truncating even for the max value. Statistics are estimate so this should be fine.
+        return OptionalLong.of(((LongTimestamp) type.getObject(block, 0)).getEpochMicros());
     }
 
     private static Optional<BigDecimal> getDecimalValue(Type type, Block block)
