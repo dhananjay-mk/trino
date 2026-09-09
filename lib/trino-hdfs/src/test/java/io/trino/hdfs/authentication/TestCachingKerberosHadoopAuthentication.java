@@ -22,13 +22,15 @@ import javax.security.auth.Subject;
 import javax.security.auth.kerberos.KerberosPrincipal;
 import javax.security.auth.kerberos.KerberosTicket;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.net.InetAddress;
 import java.time.Instant;
 import java.util.Date;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
-import static org.apache.hadoop.security.UserGroupInformation.createUserGroupInformationForSubject;
+import static org.apache.hadoop.security.UserGroupInformation.getUGIFromSubject;
 import static org.assertj.core.api.Assertions.assertThat;
 
 public class TestCachingKerberosHadoopAuthentication
@@ -94,7 +96,13 @@ public class TestCachingKerberosHadoopAuthentication
         Subject subject = new Subject();
         subject.getPrincipals().add(ticket.getClient());
         subject.getPrivateCredentials().add(ticket);
-        return createUserGroupInformationForSubject(subject);
+        try {
+            // io.hops.hadoop does not expose createUserGroupInformationForSubject
+            return getUGIFromSubject(subject);
+        }
+        catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     private static class TestingHadoopAuthentication
