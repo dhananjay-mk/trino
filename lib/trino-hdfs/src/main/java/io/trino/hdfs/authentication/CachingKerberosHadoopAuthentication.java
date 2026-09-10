@@ -44,7 +44,7 @@ public class CachingKerberosHadoopAuthentication
     public synchronized UserGroupInformation getUserGroupInformation()
     {
         throw new RuntimeException("Kerberos not supported");
-        //if (nextRefreshTime < System.currentTimeMillis()) {
+        // if (nextRefreshTime < System.currentTimeMillis()) {
         //    Subject existingSubject = userGroupInformation.getSubject();
         //    UserGroupInformation newUserGroupInformation = requireNonNull(delegate.getUserGroupInformation(), "delegate.getUserGroupInformation() is null");
         //    Subject newSubject = newUserGroupInformation.getSubject();
@@ -64,8 +64,8 @@ public class CachingKerberosHadoopAuthentication
         //        publicCredentials.addAll(newSubject.getPublicCredentials());
         //    }
         //    nextRefreshTime = calculateNextRefreshTime(newUserGroupInformation);
-        //}
-        //return userGroupInformation;
+        // }
+        // return userGroupInformation;
     }
 
     private static long calculateNextRefreshTime(UserGroupInformation userGroupInformation)

@@ -272,8 +272,8 @@ public class TestCsvFormat
 
     /**
      * @param hiveReadsTheSame false when Hive 4 no longer reads back what it wrote the way Trino does.
-     * Hive 4 ships a newer opencsv, and the two engines diverge on a few inputs; the write comparison
-     * is still made in every case, only the read back comparison is dropped.
+     *         Hive 4 ships a newer opencsv, and the two engines diverge on a few inputs; the write comparison
+     *         is still made in every case, only the read back comparison is dropped.
      */
     private static void assertTrinoHiveByteForByte(
             boolean shouldRoundTrip,

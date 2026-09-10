@@ -96,12 +96,12 @@ public class HdfsConfigurationInitializer
         }
 
         // if (domainSocketPath != null) {
-            // config.setStrings(DFS_DOMAIN_SOCKET_PATH_KEY, domainSocketPath);
+        // config.setStrings(DFS_DOMAIN_SOCKET_PATH_KEY, domainSocketPath);
         // }
 
         // only enable short circuit reads if domain socket path is properly configured
         // if (!config.get(DFS_DOMAIN_SOCKET_PATH_KEY, "").trim().isEmpty()) {
-            // config.setBooleanIfUnset(HdfsClientConfigKeys.Read.ShortCircuit.KEY, true);
+        // config.setBooleanIfUnset(HdfsClientConfigKeys.Read.ShortCircuit.KEY, true);
         // }
 
         // config.setInt(DFS_CLIENT_SOCKET_TIMEOUT_KEY, toIntExact(dfsTimeout.toMillis()));
