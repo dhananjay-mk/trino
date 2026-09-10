@@ -19,8 +19,6 @@ import io.trino.plugin.base.authentication.KerberosAuthentication;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.security.UserGroupInformation;
 
-import javax.security.auth.Subject;
-
 import static io.trino.hdfs.ConfigurationUtils.getInitialConfiguration;
 import static java.util.Objects.requireNonNull;
 // import static org.apache.hadoop.security.UserGroupInformation.createUserGroupInformationForSubject;
@@ -56,7 +54,6 @@ public class KerberosHadoopAuthentication
     @Override
     public UserGroupInformation getUserGroupInformation()
     {
-        Subject subject = kerberosAuthentication.getSubject();
         throw new RuntimeException("Kerberos Not supported");
     }
 }
