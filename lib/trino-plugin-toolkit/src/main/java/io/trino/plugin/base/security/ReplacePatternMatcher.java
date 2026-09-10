@@ -158,8 +158,10 @@ public class ReplacePatternMatcher
                     matcher.get().appendReplacement(stringBuilder, patternToReplace.get().pattern());
                 }
                 catch (IndexOutOfBoundsException e) {
-                    throw new TrinoException(CONFIGURATION_INVALID,
-                            toReplace + " in replace pattern refers to a capturing group that does not exist in " + capturingGroup, e);
+                    throw new TrinoException(
+                            CONFIGURATION_INVALID,
+                            toReplace + " in replace pattern refers to a capturing group that does not exist in " + capturingGroup,
+                            e);
                 }
                 return Optional.of(Pattern.compile(stringBuilder.toString()));
             }
