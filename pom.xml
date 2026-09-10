@@ -280,15 +280,6 @@
             </dependency>
 
             <dependency>
-                <!-- pull the transitive micrometer of openlineage-java past CVE-2026-40983, CVE-2026-40984 -->
-                <groupId>io.micrometer</groupId>
-                <artifactId>micrometer-bom</artifactId>
-                <version>1.16.7</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
-
-            <dependency>
                 <groupId>io.netty</groupId>
                 <artifactId>netty-bom</artifactId>
                 <version>${dep.netty.version}</version>
