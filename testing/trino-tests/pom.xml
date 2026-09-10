@@ -14,11 +14,6 @@
     <description>Trino - Tests</description>
 
     <dependencies>
-        <dependency>
-            <groupId>io.hops.hadoop</groupId>
-            <artifactId>hadoop-apache</artifactId>
-            <scope>test</scope>
-        </dependency>
 
         <dependency>
             <groupId>org.jetbrains</groupId>
@@ -132,6 +127,11 @@
         <dependency>
             <groupId>io.airlift</groupId>
             <artifactId>units</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.hops.hadoop</groupId>
+            <artifactId>hadoop-apache</artifactId>
             <scope>test</scope>
         </dependency>
 
