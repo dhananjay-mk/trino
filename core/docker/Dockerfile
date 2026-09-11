@@ -44,6 +44,7 @@ RUN \
       curl-minimal grep `# required by health-check` \
       zlib `#required by java` \
       shadow-utils `# required by useradd` \
+      nss_wrapper `# required by run-trino to fake passwd entry on OpenShift` \
       tar `# required to support kubectl cp` && \
       rm -rf /tmp/overlay/var/cache/*
 
@@ -63,7 +64,8 @@ RUN \
     groupadd trino --gid 1000 && \
     useradd trino --uid 1000 --gid 1000 --create-home && \
     mkdir -p /usr/lib/trino /data/trino && \
-    chown -R "trino:trino" /usr/lib/trino /data/trino
+    chown -R "trino:0" /usr/lib/trino /data/trino && \
+    chmod -R g=u /usr/lib/trino /data/trino
 
 COPY --chown=trino:trino trino-cli.jar /usr/bin/trino
 COPY --chown=trino:trino --exclude=bin/darwin-* --exclude=bin/linux-* trino-server /usr/lib/trino

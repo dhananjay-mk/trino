@@ -29,7 +29,6 @@ import io.trino.spi.type.TimestampType;
 import io.trino.spi.type.Type;
 import io.trino.spi.type.VarcharType;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hive.serde2.Deserializer;
 import org.apache.hadoop.hive.serde2.RegexSerDe;
 import org.apache.hadoop.hive.serde2.SerDeException;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
@@ -478,10 +477,16 @@ public class TestRegexFormat
         assertDate("1986-01-01 anything is allowed here", LocalDate.of(1986, 1, 1).toEpochDay());
 
         assertDate("1986-01-01", LocalDate.of(1986, 1, 1).toEpochDay());
-        assertDate("1986-01-33", LocalDate.of(1986, 2, 2).toEpochDay());
+        // Hive 3 rolled an out of range day over into the next month, Hive 4 rejects the value and
+        // returns null instead. Trino still rolls it over.
+        assertValueHive(DATE, "1986-01-33", null);
+        assertValueTrino(DATE, "1986-01-33", new SqlDate(toIntExact(LocalDate.of(1986, 2, 2).toEpochDay())));
 
-        assertDate("5881580-07-11", Integer.MAX_VALUE);
-        assertDate("-5877641-06-23", Integer.MIN_VALUE);
+        // Hive 4 rejects dates at the extremes of the int range and returns null; Trino is unchanged
+        assertValueHive(DATE, "5881580-07-11", null);
+        assertValueTrino(DATE, "5881580-07-11", new SqlDate(Integer.MAX_VALUE));
+        assertValueHive(DATE, "-5877641-06-23", null);
+        assertValueTrino(DATE, "-5877641-06-23", new SqlDate(Integer.MIN_VALUE));
 
         // Hive does not enforce size bounds and truncates the results in Date.toEpochDay
         // For Trino we fail as this behavior is error-prone
@@ -687,8 +692,8 @@ public class TestRegexFormat
                 .collect(joining(",")));
 
         try {
-            Deserializer deserializer = new RegexSerDe();
-            deserializer.initialize(configuration, schema);
+            RegexSerDe deserializer = new RegexSerDe();
+            deserializer.initialize(configuration, schema, null);
             Object rowData = deserializer.deserialize(new Text(line));
 
             StructObjectInspector rowInspector = (StructObjectInspector) deserializer.getObjectInspector();

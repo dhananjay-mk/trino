@@ -68,6 +68,36 @@
         </dependency>
 
         <dependency>
+            <groupId>io.hops.hudi</groupId>
+            <artifactId>hudi-common</artifactId>
+            <version>${dep.hudi.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
+            <groupId>io.hops.hudi</groupId>
+            <artifactId>hudi-io</artifactId>
+            <version>${dep.hudi.version}</version>
+            <exclusions>
+                <!-- Only HoodieArrowAllocator needs Arrow and nothing on the Trino read path calls it -->
+                <exclusion>
+                    <groupId>org.apache.arrow</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+                <!-- Compile-time annotation processor, must not be packaged into the plugin -->
+                <exclusion>
+                    <groupId>org.projectlombok</groupId>
+                    <artifactId>lombok</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
             <groupId>io.trino</groupId>
             <artifactId>trino-filesystem</artifactId>
         </dependency>
@@ -115,24 +145,6 @@
         <dependency>
             <groupId>org.apache.avro</groupId>
             <artifactId>avro</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.hudi</groupId>
-            <artifactId>hudi-common</artifactId>
-            <version>${dep.hudi.version}</version>
-            <exclusions>
-                <exclusion>
-                    <groupId>*</groupId>
-                    <artifactId>*</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.hudi</groupId>
-            <artifactId>hudi-io</artifactId>
-            <version>${dep.hudi.version}</version>
         </dependency>
 
         <dependency>
@@ -231,6 +243,65 @@
         </dependency>
 
         <dependency>
+            <groupId>io.hops.hadoop</groupId>
+            <artifactId>hadoop-apache</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>io.hops.hudi</groupId>
+            <artifactId>hudi-client-common</artifactId>
+            <version>${dep.hudi.version}</version>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
+            <groupId>io.hops.hudi</groupId>
+            <artifactId>hudi-hadoop-common</artifactId>
+            <version>${dep.hudi.version}</version>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
+            <groupId>io.hops.hudi</groupId>
+            <artifactId>hudi-io</artifactId>
+            <version>${dep.hudi.version}</version>
+            <classifier>tests</classifier>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
+            <groupId>io.hops.hudi</groupId>
+            <artifactId>hudi-java-client</artifactId>
+            <version>${dep.hudi.version}</version>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>io.hops.hudi</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
             <groupId>io.trino</groupId>
             <artifactId>trino-hdfs</artifactId>
             <scope>test</scope>
@@ -300,68 +371,9 @@
         </dependency>
 
         <dependency>
-            <groupId>io.trino.hadoop</groupId>
-            <artifactId>hadoop-apache</artifactId>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
             <groupId>io.trino.tpch</groupId>
             <artifactId>tpch</artifactId>
             <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.hudi</groupId>
-            <artifactId>hudi-client-common</artifactId>
-            <version>${dep.hudi.version}</version>
-            <scope>test</scope>
-            <exclusions>
-                <exclusion>
-                    <groupId>*</groupId>
-                    <artifactId>*</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.hudi</groupId>
-            <artifactId>hudi-hadoop-common</artifactId>
-            <version>${dep.hudi.version}</version>
-            <scope>test</scope>
-            <exclusions>
-                <exclusion>
-                    <groupId>*</groupId>
-                    <artifactId>*</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.hudi</groupId>
-            <artifactId>hudi-io</artifactId>
-            <version>${dep.hudi.version}</version>
-            <classifier>tests</classifier>
-            <scope>test</scope>
-            <exclusions>
-                <exclusion>
-                    <groupId>*</groupId>
-                    <artifactId>*</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.hudi</groupId>
-            <artifactId>hudi-java-client</artifactId>
-            <version>${dep.hudi.version}</version>
-            <scope>test</scope>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.apache.hudi</groupId>
-                    <artifactId>*</artifactId>
-                </exclusion>
-            </exclusions>
         </dependency>
 
         <dependency>
@@ -408,7 +420,7 @@
                 <artifactId>duplicate-finder-maven-plugin</artifactId>
                 <configuration>
                     <ignoredResourcePatterns>
-                        <!-- org.apache.hudi:hudi-client-common and org.apache.hudi:hudi-java-client log4j.properties duplicates -->
+                        <!-- io.hops.hudi:hudi-client-common and io.hops.hudi:hudi-java-client log4j.properties duplicates -->
                         <ignoredResourcePattern>log4j.properties</ignoredResourcePattern>
                         <ignoredResourcePattern>log4j-surefire.properties</ignoredResourcePattern>
                     </ignoredResourcePatterns>
