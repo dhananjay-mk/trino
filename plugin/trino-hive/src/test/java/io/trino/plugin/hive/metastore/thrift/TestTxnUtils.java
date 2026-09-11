@@ -34,7 +34,8 @@ public class TestTxnUtils
         aborted.set(2, 4);
         ByteBuffer abortedBits = ByteBuffer.wrap(aborted.toByteArray());
 
-        long currentTxn = 7;
+        // Hive 4 asserts currentTxn <= txnHighWaterMark, so currentTxn must not exceed the high water mark
+        long currentTxn = 6;
         var trinoResponse = new GetOpenTxnsResponse(6, List.of(1L, 2L, 3L), abortedBits);
         String trinoValue = createValidReadTxnList(trinoResponse, currentTxn);
 
@@ -42,11 +43,11 @@ public class TestTxnUtils
                 trinoResponse.getTxnHighWaterMark(),
                 trinoResponse.getOpenTxns(),
                 trinoResponse.bufferForAbortedBits());
-        String hiveValue = org.apache.hadoop.hive.metastore.txn.TxnUtils.createValidReadTxnList(hiveResponse, currentTxn).toString();
+        String hiveValue = org.apache.hadoop.hive.metastore.txn.TxnCommonUtils.createValidReadTxnList(hiveResponse, currentTxn).toString();
 
         assertThat(trinoValue)
                 .isEqualTo(hiveValue)
-                .isEqualTo("6:1:1,2,0:3");
+                .isEqualTo("6:1:1,2:3");
     }
 
     @Test
@@ -66,7 +67,7 @@ public class TestTxnUtils
         var hiveIds = trinoIds.stream()
                 .map(TestTxnUtils::toHiveTableValidWriteIds)
                 .toList();
-        String hiveValue = org.apache.hadoop.hive.metastore.txn.TxnUtils.createValidTxnWriteIdList(currentTxn, hiveIds).toString();
+        String hiveValue = org.apache.hadoop.hive.metastore.txn.TxnCommonUtils.createValidTxnWriteIdList(currentTxn, hiveIds).toString();
 
         // the expected result depends on HashMap iteration order (matches Hive behavior)
         assertThat(trinoValue)
@@ -85,7 +86,7 @@ public class TestTxnUtils
         String trinoValue = TxnUtils.createValidWriteIdList(trinoIds);
 
         var hiveIds = toHiveTableValidWriteIds(trinoIds);
-        String hiveValue = org.apache.hadoop.hive.metastore.txn.TxnUtils.createValidReaderWriteIdList(hiveIds).toString();
+        String hiveValue = org.apache.hadoop.hive.metastore.txn.TxnCommonUtils.createValidReaderWriteIdList(hiveIds).toString();
 
         assertThat(trinoValue)
                 .isEqualTo(hiveValue)
