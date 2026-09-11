@@ -203,7 +203,12 @@
         <dep.jna.version>5.19.1</dep.jna.version>
         <dep.jsonwebtoken.version>0.13.0</dep.jsonwebtoken.version>
         <dep.jts.version>1.20.0</dep.jts.version>
-        <dep.netty.version>4.2.16.Final</dep.netty.version>
+        <!-- override airbase 395 (318): the launcher is a Go binary; 321 is built with go1.26.5
+             and golang.org/x/text v0.40.0, clearing CVE-2026-56852 and 12 of the 20 reported
+             Go stdlib CVEs. The remaining 8 need a launcher built with go1.26.6+. -->
+        <dep.launcher.version>321</dep.launcher.version>
+        <!-- override airbase 395 (4.2.16.Final): 39 reported netty CVE rows, fixed in 4.2.17.Final -->
+        <dep.netty.version>4.2.17.Final</dep.netty.version>
         <dep.okhttp.version>5.4.0</dep.okhttp.version>
         <dep.okio.version>3.17.0</dep.okio.version>
         <dep.parquet.version>1.17.1</dep.parquet.version>
@@ -1865,7 +1870,7 @@
             <dependency>
                 <groupId>org.apache.httpcomponents.client5</groupId>
                 <artifactId>httpclient5</artifactId>
-                <version>5.6.2</version>
+                <version>5.6.4</version>
             </dependency>
 
             <dependency>
@@ -2099,7 +2104,7 @@
             <dependency>
                 <groupId>org.apache.thrift</groupId>
                 <artifactId>libthrift</artifactId>
-                <version>0.23.0</version>
+                <version>0.24.0</version>
             </dependency>
 
             <dependency>

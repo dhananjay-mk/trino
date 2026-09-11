@@ -8,7 +8,9 @@ column-masking, row-filtering and audit logging.
 ## Requirements
 
 * Access to a Apache Ranger deployment with the desired authorization policies.
-* Access to an audit store using Solr, HDFS, Log4J, Elasticsearch, or S3 to save audit logs.
+* Access to an audit store using HDFS, Log4J, Elasticsearch, or S3 to save audit logs.
+  The Solr audit destination is not bundled in this build, and enabling it fails
+  coordinator startup.
 * Apache Ranger 2.5.0 and greater include the required Trino service definition.
   Earlier versions of Apache Ranger require an [update to the service definition
   available on
@@ -121,18 +123,6 @@ The following table lists the configuration properties for the Ranger access con
     <name>xasecure.audit.is.enabled</name>
     <value>true</value>
     <description>Boolean flag to specify if the plugin should generate access audit logs. Default: true</description>
-  </property>
-
-  <property>
-    <name>xasecure.audit.solr.is.enabled</name>
-    <value>false</value>
-    <description>Boolean flag to specify if audit logs should be stored in Solr. Default: false</description>
-  </property>
-
-  <property>
-    <name>xasecure.audit.solr.solr_url</name>
-    <value></value>
-    <description>URL to Solr deployment where the plugin should send access audits to</description>
   </property>
 
   <property>
