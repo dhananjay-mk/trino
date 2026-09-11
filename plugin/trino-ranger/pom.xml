@@ -17,8 +17,6 @@
     <properties>
         <dep.aws-sdk.version>1.12.797</dep.aws-sdk.version>
         <dep.graalvm.version>25.1.3</dep.graalvm.version>
-        <!-- TODO: remove once Ranger upgrades to Jetty 12 -->
-        <dep.jetty11.version>11.0.26</dep.jetty11.version>
         <dep.ranger.version>2.8.0</dep.ranger.version>
     </properties>
     <dependencies>
@@ -235,61 +233,21 @@
             </exclusions>
         </dependency>
 
-        <dependency>
-            <groupId>org.apache.ranger</groupId>
-            <artifactId>ranger-audit-dest-solr</artifactId>
-            <version>${dep.ranger.version}</version>
-            <scope>runtime</scope>
-            <exclusions>
-                <exclusion>
-                    <groupId>commons-logging</groupId>
-                    <artifactId>commons-logging</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.eclipse.jetty</groupId>
-                    <artifactId>*</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
+        <!--
+            ranger-audit-dest-solr is intentionally omitted, along with the five Jetty 11
+            runtime declarations that existed only to replace the Jetty pulled in by its
+            solr-solrj dependency. jetty-http 11.0.26 is affected by CVE-2026-2332 with no
+            fix available: the advisory names 11.0.29, but 11.0.26 is the last public Jetty
+            11 release (Jetty 11 is EOL). Solr auditing is therefore unavailable in this
+            build - setting xasecure.audit.solr.is.enabled or
+            xasecure.audit.destination.solr fails coordinator startup, since Ranger loads
+            the audit destination reflectively and wraps the ClassNotFoundException in a
+            RuntimeException. The other audit destinations are unaffected.
+        -->
 
         <dependency>
             <groupId>org.apache.zookeeper</groupId>
             <artifactId>zookeeper</artifactId>
-            <scope>runtime</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.eclipse.jetty</groupId>
-            <artifactId>jetty-alpn-client</artifactId>
-            <version>${dep.jetty11.version}</version>
-            <scope>runtime</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.eclipse.jetty</groupId>
-            <artifactId>jetty-client</artifactId>
-            <version>${dep.jetty11.version}</version>
-            <scope>runtime</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.eclipse.jetty</groupId>
-            <artifactId>jetty-http</artifactId>
-            <version>${dep.jetty11.version}</version>
-            <scope>runtime</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.eclipse.jetty</groupId>
-            <artifactId>jetty-io</artifactId>
-            <version>${dep.jetty11.version}</version>
-            <scope>runtime</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.eclipse.jetty</groupId>
-            <artifactId>jetty-util</artifactId>
-            <version>${dep.jetty11.version}</version>
             <scope>runtime</scope>
         </dependency>
 
